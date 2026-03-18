@@ -85,16 +85,9 @@ curl http://127.0.0.1:8090/health
 
 You should see `{"status":"ok",...}`.
 
-## 7. Set up SSL certificate
+## 7. Configure nginx
 
-```bash
-apt-get install -y certbot python3-certbot-nginx
-certbot --nginx -d tbbdispatcher.uz
-```
-
-Follow the prompts. Certbot will auto-configure SSL.
-
-## 8. Configure nginx
+Set up nginx **before** SSL so that certbot can find the `server_name` directive:
 
 ```bash
 cp nginx.conf /etc/nginx/sites-available/tbbdispatcher.uz
@@ -103,6 +96,15 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
 ```
+
+## 8. Set up SSL certificate
+
+```bash
+apt-get install -y certbot python3-certbot-nginx
+certbot --nginx -d tbbdispatcher.uz
+```
+
+Certbot will auto-configure SSL in the nginx config.
 
 ## 9. Verify deployment
 
