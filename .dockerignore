@@ -1,0 +1,9 @@
+.git
+.claude
+.env
+.env.*
+!.env.example
+node_modules
+*.md
+dev-server.js
+bot.txt

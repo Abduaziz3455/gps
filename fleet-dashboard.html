@@ -713,10 +713,9 @@
     const ACTIVE_TAB_STORAGE_KEY = 'fleet_dashboard_active_tab_v1';
     const STATUS_LEGEND_COLLAPSED_KEY = 'fleet_dashboard_legend_collapsed_v1';
     const MOTION_STATE_STORAGE_KEY = 'fleet_motion_state_v1';
-    const AUTO_LOGIN_CREDENTIALS = {
-      login: 'MadinaAuto',
-      password: 'Gogps#2025m'
-    };
+    // Credentials are injected by server.js at serve time from environment variables.
+    // Do NOT hardcode real credentials here — set GPS_LOGIN and GPS_PASSWORD in .env
+    const AUTO_LOGIN_CREDENTIALS = { login: '', password: '' };
 
     const STATUS_COLORS = {
       moving: '#00C853',

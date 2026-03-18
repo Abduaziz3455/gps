@@ -1,0 +1,14 @@
+{
+  "name": "gps-fleet-dashboard",
+  "version": "1.0.0",
+  "description": "GPS Fleet Management Dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node dev-server.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "private": true
+}

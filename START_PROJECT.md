@@ -1,73 +1,166 @@
-# START PROJECT (Fresh Instructions)
+# Deploy GPS Fleet Dashboard to Production
 
-This project runs as a static dashboard + local Node proxy server.
-Use the local server so browser/API requests work correctly (CORS-safe).
+Server: Ubuntu with nginx already installed
+Domain: tbbdispatcher.uz
 
-## 0) Requirements
+---
 
-- Node.js installed (`node -v` should work)
-- Git installed (`git --version` should work)
-
-## 1) Get the project
-
-### Option A: Clone from GitHub
+## 1. Connect to your server
 
 ```bash
-git clone https://github.com/khdrvss/gps.git
-cd gps
+ssh root@your-server-ip
 ```
 
-### Option B: If project already exists locally
+## 2. Install Node.js (if not installed)
 
 ```bash
-cd /home/ubuntu/projects/tbbgps
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt-get install -y nodejs
+node -v
 ```
 
-## 2) Start dev server
+## 3. Install Docker & Docker Compose (if not installed)
 
 ```bash
-node dev-server.js
+apt-get update
+apt-get install -y ca-certificates curl
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+systemctl enable docker
+systemctl start docker
+docker --version
 ```
 
-Default URL:
-
-```text
-http://127.0.0.1:8090/fleet-dashboard.html
-```
-
-## 3) Open dashboard
-
-Open this in browser:
-
-```text
-http://127.0.0.1:8090/fleet-dashboard.html
-```
-
-## 4) (Optional) Run on different port
+## 4. Clone the project
 
 ```bash
-PORT=8091 node dev-server.js
+mkdir -p /root
+cd /root
+git clone https://github.com/khdrvss/gps.git tbb_dispatcher
+cd tbb_dispatcher
 ```
 
-Then open:
-
-```text
-http://127.0.0.1:8091/fleet-dashboard.html
-```
-
-## 5) Health check commands
+If already cloned:
 
 ```bash
-curl -I http://127.0.0.1:8090/fleet-dashboard.html
-curl -I http://127.0.0.1:8090/gps-api/api/v3/auth/check
+cd /root/tbb_dispatcher
+git pull origin main
 ```
 
-Expected: HTTP status `200` for dashboard endpoint.
+## 5. Create .env file
 
-## 6) Stop server
+```bash
+cp .env.example .env
+nano .env
+```
 
-In the running terminal, press:
+Fill in your real credentials:
 
-```text
-Ctrl + C
+```
+NODE_ENV=production
+PORT=8090
+API_ORIGIN=https://baku.gps.az
+GPS_LOGIN=MadinaAuto
+GPS_PASSWORD=YourRealPassword
+CORS_ORIGINS=https://tbbdispatcher.uz
+```
+
+Save and exit (`Ctrl+X`, `Y`, `Enter`).
+
+## 6. Build and start the app with Docker
+
+```bash
+docker compose up -d --build
+```
+
+Verify it's running:
+
+```bash
+docker compose ps
+curl http://127.0.0.1:8090/health
+```
+
+You should see `{"status":"ok",...}`.
+
+## 7. Set up SSL certificate
+
+```bash
+apt-get install -y certbot python3-certbot-nginx
+certbot --nginx -d tbbdispatcher.uz
+```
+
+Follow the prompts. Certbot will auto-configure SSL.
+
+## 8. Configure nginx
+
+```bash
+cp nginx.conf /etc/nginx/sites-available/tbbdispatcher.uz
+ln -sf /etc/nginx/sites-available/tbbdispatcher.uz /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl reload nginx
+```
+
+## 9. Verify deployment
+
+```bash
+# Health check
+curl https://tbbdispatcher.uz/health
+
+# Dashboard should load
+curl -I https://tbbdispatcher.uz/
+```
+
+Open in browser: https://tbbdispatcher.uz
+
+## 10. Point your domain DNS
+
+In your domain registrar (for tbbdispatcher.uz), create an A record:
+
+```
+Type: A
+Name: @
+Value: your-server-ip
+TTL: 300
+```
+
+---
+
+## Useful commands
+
+### View logs
+
+```bash
+cd /root/tbb_dispatcher
+docker compose logs -f
+```
+
+### Restart the app
+
+```bash
+docker compose restart
+```
+
+### Stop the app
+
+```bash
+docker compose down
+```
+
+### Update to latest code
+
+```bash
+cd /root/tbb_dispatcher
+git pull origin main
+docker compose up -d --build
+```
+
+### Renew SSL (auto-renews, but manual if needed)
+
+```bash
+certbot renew
+systemctl reload nginx
 ```
