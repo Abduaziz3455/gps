@@ -13,6 +13,7 @@ const PAGES = [
 ];
 
 let cleanup = null;
+let routeSeq = 0; // the latest navigation; pages that finish loading after it are dropped
 let stopStream = null;
 
 async function boot() {
@@ -177,7 +178,9 @@ function renderHealth(h) {
     if (!h?.gps) rows.push(row('GPS ulanmagan', '', ''));
     if (!h?.nvr) rows.push(row('Kameralar ulanmagan', '', ''));
   }
-  setHtml($('#healthBox'), html`${rows}`);
+  // All well: one calm line, with the details on hover. Otherwise only what needs attention.
+  const problems = rows.filter((r) => !/class="dot ok"/.test(String(r)));
+  setHtml($('#healthBox'), problems.length ? html`${problems}` : row('Tizim ishlayapti', 'ok', 'Jonli aloqa, server, GPS, zavod interneti va kameralar ishlayapti'));
   renderBanner();
 }
 
@@ -204,6 +207,7 @@ function tickClock() {
 }
 
 async function route() {
+  const seq = ++routeSeq;
   const hash = location.hash.replace(/^#\/?/, '') || 'xarita';
   const [pathPart, query = ''] = hash.split('?');
   const [path, ...rest] = pathPart.split('/');
@@ -219,12 +223,18 @@ async function route() {
   main.innerHTML = '<div class="boot" style="position:absolute"><div class="spinner"></div></div>';
   try {
     const mod = await page.load();
-    main.innerHTML = '';
+    if (seq !== routeSeq) return;
+    // Each page draws into its own box: one that's left mid-load writes to a box no longer on screen.
+    const host = document.createElement('div');
+    host.style.display = 'contents';
+    main.replaceChildren(host);
     main.scrollTop = 0;
-    cleanup = await mod.default.render(main, { params: rest, query: Object.fromEntries(new URLSearchParams(query)), setTitle: (t) => { $('#pageTitle').textContent = t; } });
+    const done = await mod.default.render(host, { params: rest, query: Object.fromEntries(new URLSearchParams(query)), setTitle: (t) => { $('#pageTitle').textContent = t; } });
+    if (seq !== routeSeq) { try { done?.(); } catch (e) { console.error(e); } return; }
+    cleanup = done;
   } catch (e) {
     console.error(e);
-    main.innerHTML = `<div class="page"><div class="notice bad">Sahifani ochib bo'lmadi: ${esc(e.message)}</div></div>`;
+    if (seq === routeSeq) main.innerHTML = `<div class="page"><div class="notice bad">Sahifani ochib bo'lmadi: ${esc(e.message)}</div></div>`;
   }
 }
 

@@ -274,14 +274,28 @@ test.describe('header', () => {
     await owner.post('/api/alerts/ack-all');
   });
 
-  test('sidebar shows live connection and each part of the system', async ({ page, signIn }) => {
+  test('sidebar: one calm line while everything works, with the details on hover', async ({ page, signIn }) => {
     await signIn('owner');
     const box = page.locator('#healthBox');
-    await expect(box).toContainText('Jonli aloqa');
-    await expect(box).toContainText('GPS');
-    await expect(box).toContainText('Kamera tizimi (NVR)');
-    await expect(box.locator('.dot.bad')).toHaveCount(0);
+    await expect(box).toHaveText('Tizim ishlayapti');
+    await expect(box.locator('.dot')).toHaveCount(1);
+    await expect(box.locator('.dot.ok')).toHaveCount(1);
+    await expect(box.locator('.health-row')).toHaveAttribute('title', /GPS/);
   });
+});
+
+test('switching page while the last one still loads: the page you asked for stays', async ({ page, signIn }) => {
+  await page.route(/\/js\/pages\/live\.js/, async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.fallback();
+  });
+  await signIn('owner');
+  await page.evaluate(() => { location.hash = '#/darvoza'; });
+  await expect(page.locator('#gTiles .tile').first()).toBeVisible();
+  await page.waitForTimeout(2500); // the slow page has finished by now
+  await expect(page.locator('#gTiles .tile').first()).toBeVisible();
+  await expect(page.locator('.live')).toHaveCount(0);
+  await expect(page.locator('#pageTitle')).toHaveText('Darvoza va hovli');
 });
 
 test.describe('stored text is shown as text, never run', () => {
