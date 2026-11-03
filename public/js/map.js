@@ -31,7 +31,13 @@ export function createMap(node, { center, zoom = 12 } = {}) {
   ro.observe(node);
   return {
     map,
-    destroy() { off(); mq.removeEventListener?.('change', setTiles); ro.disconnect(); map.remove(); },
+    destroy() {
+      off(); mq.removeEventListener?.('change', setTiles); ro.disconnect();
+      // Leaving mid-zoom: Leaflet's pending zoom-end timer would run on the removed map.
+      map._animatingZoom = false; // its zoom-end timer returns early when no zoom is in progress
+      map.stop();
+      map.remove();
+    },
   };
 }
 
@@ -90,9 +96,9 @@ export class VehicleLayer {
     this.sync([prev, id].filter((x) => x != null));
   }
 
-  fit(padding = 40) {
+  fit(padding = 40, animate = true) {
     const pts = [...this.markers.values()].map((m) => m.getLatLng());
-    if (pts.length) this.map.fitBounds(L.latLngBounds(pts), { padding: [padding, padding], maxZoom: 15 });
+    if (pts.length) this.map.fitBounds(L.latLngBounds(pts), { padding: [padding, padding], maxZoom: 15, animate });
   }
 
   clear() { for (const m of this.markers.values()) m.remove(); this.markers.clear(); }
