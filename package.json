@@ -1,14 +1,23 @@
 {
-  "name": "gps-fleet-dashboard",
-  "version": "1.0.0",
-  "description": "GPS Fleet Management Dashboard",
+  "name": "tbb-dispatcher",
+  "version": "2.0.0",
+  "description": "TBB Dispatcher: live fleet map, gate cameras, analytics and push notifications",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node dev-server.js"
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "MOCK=1 node --disable-warning=ExperimentalWarning server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test 'test/*.test.js'",
+    "user": "node --disable-warning=ExperimentalWarning scripts/user.js"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "leaflet": "1.9.4",
+    "web-push": "3.6.7"
+  },
+  "optionalDependencies": {
+    "sharp": "0.35.5"
   },
   "private": true
 }

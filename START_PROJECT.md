@@ -1,168 +1,79 @@
-# Deploy GPS Fleet Dashboard to Production
+# Deploy TBB Dispatcher v2
 
-Server: Ubuntu with nginx already installed
-Domain: tbbdispatcher.uz
+Server: Ubuntu with nginx and Docker (tbbdispatcher.uz, 38.242.242.133). Takes over from v1 in the same folder.
 
----
+## 1. Before you start
 
-## 1. Connect to your server
+- The NVR must be reachable from this server: `curl -s -o /dev/null -w '%{http_code}\n' http://<NVR_HOST>/ISAPI/System/deviceInfo`
+  must print `401` (= it answers and wants a password). If it times out, allow 38.242.242.133 on the site router.
+- GoGPS login and the NVR password: the same values as in the notifier's `.env` on the `icall` server.
 
-```bash
-ssh root@your-server-ip
-```
-
-## 2. Install Node.js (if not installed)
-
-```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt-get install -y nodejs
-node -v
-```
-
-## 3. Install Docker & Docker Compose (if not installed)
-
-```bash
-apt-get update
-apt-get install -y ca-certificates curl
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-systemctl enable docker
-systemctl start docker
-docker --version
-```
-
-## 4. Clone the project
-
-```bash
-mkdir -p /root
-cd /root
-git clone https://github.com/khdrvss/gps.git tbb_dispatcher
-cd tbb_dispatcher
-```
-
-If already cloned:
+## 2. Get the code
 
 ```bash
 cd /root/tbb_dispatcher
-git pull origin main
 ```
-
-## 5. Create .env file
 
 ```bash
-cp .env.example .env
-nano .env
+git fetch origin && git checkout main && git pull
 ```
 
-Fill in your real credentials:
+## 3. Configure
 
-```
-NODE_ENV=production
-PORT=8090
-API_ORIGIN=https://baku.gps.az
-GPS_LOGIN=MadinaAuto
-GPS_PASSWORD=YourRealPassword
-CORS_ORIGINS=https://tbbdispatcher.uz
+```bash
+cp .env.example .env && nano .env
 ```
 
-Save and exit (`Ctrl+X`, `Y`, `Enter`).
+Fill in `GPS_LOGIN`, `GPS_PASSWORD`, `NVR_HOST`, `NVR_PASSWORD`, `OWNER_USERNAME`, `OWNER_PASSWORD`
+(the first owner account; 8+ characters), `PUBLIC_ORIGIN=https://tbbdispatcher.uz`.
 
-## 6. Build and start the app with Docker
+```bash
+mkdir -p data && sudo chown -R 1000:1000 data && chmod 600 .env
+```
+
+## 4. Start
 
 ```bash
 docker compose up -d --build
 ```
 
-Verify it's running:
-
 ```bash
-docker compose ps
-curl http://127.0.0.1:8090/health
-```
-
-You should see `{"status":"ok",...}`.
-
-## 7. Configure nginx
-
-Set up nginx **before** SSL so that certbot can find the `server_name` directive:
-
-```bash
-cp nginx.conf /etc/nginx/sites-available/tbbdispatcher.uz
-ln -sf /etc/nginx/sites-available/tbbdispatcher.uz /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-nginx -t
-systemctl reload nginx
-```
-
-## 8. Set up SSL certificate
-
-```bash
-apt-get install -y certbot python3-certbot-nginx
-certbot --nginx -d tbbdispatcher.uz
-```
-
-Certbot will auto-configure SSL in the nginx config.
-
-## 9. Verify deployment
-
-```bash
-# Health check
-curl https://tbbdispatcher.uz/health
-
-# Dashboard should load
-curl -I https://tbbdispatcher.uz/
-```
-
-Open in browser: https://tbbdispatcher.uz
-
-## 10. Point your domain DNS
-
-In your domain registrar (for tbbdispatcher.uz), create an A record:
-
-```
-Type: A
-Name: @
-Value: your-server-ip
-TTL: 300
-```
-
----
-
-## Useful commands
-
-### View logs
-
-```bash
-cd /root/tbb_dispatcher
 docker compose logs -f
 ```
 
-### Restart the app
+Expect: `GPS fleet: 20 vehicles`, `camera history: importing 30 days`, then `rollup ... done` for 30 days
+(a few minutes: GoGPS allows one request per second).
 
 ```bash
-docker compose restart
+curl -s http://127.0.0.1:8090/health
 ```
 
-### Stop the app
+## 5. nginx
+
+The new config adds the live-stream location (no buffering). Certificates stay where certbot put them.
 
 ```bash
-docker compose down
+cp nginx.conf /etc/nginx/sites-available/tbbdispatcher.uz && nginx -t && systemctl reload nginx
 ```
 
-### Update to latest code
+## 6. After the switch
 
-```bash
-cd /root/tbb_dispatcher
-git pull origin main
-docker compose up -d --build
-```
+1. Log in at https://tbbdispatcher.uz as the owner. Settings → Users: create the dispatchers' accounts.
+2. Settings → Vehicles: set each truck's type and, where GoGPS names it differently, its real plate
+   (suggestions appear once the cameras have seen it).
+3. **Change the GoGPS password** (v1 published it in the page source), then update `GPS_PASSWORD` here and in the
+   notifier's `.env` on `icall`, and restart both.
+4. Phones: open the site, add it to the Home Screen (iPhone: Share → Add to Home Screen), Settings →
+   Notifications → Turn on.
+5. Remove `OWNER_PASSWORD` from `.env`.
 
-### Renew SSL (auto-renews, but manual if needed)
+## Everyday
 
-```bash
-certbot renew
-systemctl reload nginx
-```
+| | |
+|---|---|
+| Logs | `docker compose logs -f` |
+| Update | `git pull && docker compose up -d --build` |
+| Users from the shell | `docker compose exec app npm run user -- list` (also `add`, `password`, `disable`) |
+| Backup | copy `data/dispatcher.db` (and `data/photos/` if wanted); `sqlite3 data/dispatcher.db ".backup /root/backup.db"` while running |
+
+Only one instance may run (it polls GoGPS and the NVR).

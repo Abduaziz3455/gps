@@ -7,3 +7,5 @@ node_modules
 *.md
 dev-server.js
 bot.txt
+data
+test

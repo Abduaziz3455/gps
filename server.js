@@ -1,233 +1,175 @@
-const http = require('http');
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
-const { URL } = require('url');
+'use strict';
+/**
+ * TBB Dispatcher v2 server: one process for the web app, the JSON API, the GPS poller, the camera pipeline,
+ * analytics rollups, alert rules and push notifications. See docs/ARCHITECTURE.md.
+ */
+const fs = require('node:fs');
+const path = require('node:path');
+const http = require('node:http');
 
-/* ── Configuration ─────────────────────────────────────── */
+loadEnv(path.join(__dirname, '.env'));
 
-const NODE_ENV = process.env.NODE_ENV || 'production';
-const PORT = Number(process.env.PORT || 8090);
-const HOST = '0.0.0.0';
-const API_ORIGIN = process.env.API_ORIGIN || 'https://baku.gps.az';
-const ROOT = __dirname;
+const config = require('./src/config');
+const { open, helpers } = require('./src/db');
+const { Auth } = require('./src/auth');
+const { GpsClient } = require('./src/gps/client');
+const { Poller } = require('./src/gps/poller');
+const { Gate } = require('./src/gate');
+const { Analytics } = require('./src/analytics');
+const { Rules } = require('./src/rules');
+const { Push } = require('./src/push');
+const { buildApi, apiHandler } = require('./src/api');
+const { serveFile, securityHeaders, json } = require('./src/http');
 
-const GPS_LOGIN = process.env.GPS_LOGIN || '';
-const GPS_PASSWORD = process.env.GPS_PASSWORD || '';
-
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || '*')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
-
-/* ── MIME types ─────────────────────────────────────────── */
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js':   'text/javascript; charset=utf-8',
-  '.css':  'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg':  'image/svg+xml',
-  '.png':  'image/png',
-  '.jpg':  'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.ico':  'image/x-icon'
+const log = {
+  info: (m) => process.stdout.write(`${new Date().toISOString()} INFO ${m}\n`),
+  warn: (m) => process.stdout.write(`${new Date().toISOString()} WARN ${m}\n`),
+  error: (m) => process.stderr.write(`${new Date().toISOString()} ERROR ${m}\n`),
 };
 
-/* ── Helpers ───────────────────────────────────────────── */
-
-function log(msg) {
-  const ts = new Date().toISOString();
-  process.stdout.write(`[${ts}] ${msg}\n`);
-}
-
-function isOriginAllowed(origin) {
-  if (CORS_ORIGINS.includes('*')) return true;
-  return CORS_ORIGINS.includes(origin);
-}
-
-function setCors(req, res) {
-  const origin = req.headers.origin || '*';
-  if (isOriginAllowed(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Auth,Authorization');
-}
-
-function setSecurityHeaders(res) {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  if (NODE_ENV === 'production') {
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+function loadEnv(file) {
+  if (!fs.existsSync(file)) return;
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
+    if (m && !line.trim().startsWith('#') && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
   }
 }
 
-function send(res, code, body, contentType = 'text/plain; charset=utf-8') {
-  res.statusCode = code;
-  res.setHeader('Content-Type', contentType);
-  res.end(body);
+function build() {
+  const db = open(path.join(config.dataDir, 'dispatcher.db'));
+  const h = helpers(db);
+  const auth = new Auth({ h, config });
+  auth.ensureOwner(log);
+
+  let gps = null, nvr = null, sim = null;
+  if (config.mock) {
+    const { Sim, MockGps, MockNvr, MOCK_TYPES } = require('./src/mock/sim');
+    sim = new Sim({ yard: config.yard });
+    gps = new MockGps({ sim });
+    nvr = new MockNvr({ sim, cameras: config.nvr.cameras });
+    log.warn('MOCK mode: simulated GPS and cameras (demo data)');
+    ctxSeed = { MOCK_TYPES };
+  } else {
+    if (config.gps.enabled) gps = new GpsClient({ ...config.gps, tzOffsetMin: config.tzOffsetMin, log });
+    else log.warn('GPS_LOGIN / GPS_PASSWORD not set: live map and GPS analytics are off');
+    if (config.nvr.enabled) {
+      const { NVR } = require('./src/cameras/hikvision');
+      nvr = new NVR({ host: config.nvr.host, user: config.nvr.user, password: config.nvr.password, tzOffsetMin: config.tzOffsetMin });
+    } else log.warn('NVR_HOST / NVR_PASSWORD not set: gate cameras are off');
+  }
+
+  const poller = gps ? new Poller({ h, gps, config, log }) : null;
+  let gate = null;
+  if (nvr) {
+    const { Tracker } = require('./src/cameras/tracker');
+    const plates = require('./src/cameras/plates');
+    let gateRef = null;
+    const tracker = new Tracker(db, {
+      repeatWindowMs: config.nvr.repeatWindowMin * 60e3,
+      samePassWindowMs: config.nvr.samePassWindowSec * 1000,
+      fleetPlates: () => (gateRef ? gateRef.fleetPlates() : []),
+    });
+    gate = gateRef = new Gate({ h, nvr, poller, config, tracker, plates, log });
+  }
+  const analytics = new Analytics({ h, gps, config, log });
+  const rules = new Rules({ h, config, poller, gate, log });
+  const push = new Push({ h, config, log });
+  const ctx = { h, db, config, auth, gps, nvr, poller, gate, analytics, rules, push, sim, log };
+  return ctx;
 }
 
-/* ── Credential injection ──────────────────────────────── */
+let ctxSeed = null;
 
-let dashboardCache = null;
+async function start() {
+  const ctx = build();
+  const { config: cfg, poller, gate, analytics, rules, push, h } = ctx;
+  const api = apiHandler(ctx, buildApi(ctx));
+  const publicDir = path.join(__dirname, 'public');
+  const leafletDir = path.join(__dirname, 'node_modules', 'leaflet', 'dist');
+  const version = require('./package.json').version;
 
-function getDashboardHtml() {
-  if (dashboardCache && NODE_ENV === 'production') return dashboardCache;
-
-  let html = fs.readFileSync(path.join(ROOT, 'fleet-dashboard.html'), 'utf-8');
-
-  // Replace the placeholder credentials with real ones from env
-  html = html.replace(
-    /const AUTO_LOGIN_CREDENTIALS\s*=\s*\{[^}]+\};/,
-    `const AUTO_LOGIN_CREDENTIALS = { login: ${JSON.stringify(GPS_LOGIN)}, password: ${JSON.stringify(GPS_PASSWORD)} };`
-  );
-
-  dashboardCache = html;
-  return html;
-}
-
-/* ── Static file server ────────────────────────────────── */
-
-function serveStatic(req, res) {
-  const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  let reqPath = decodeURIComponent(parsed.pathname || '/');
-  if (reqPath === '/') reqPath = '/fleet-dashboard.html';
-
-  // Serve dashboard with injected credentials
-  if (reqPath === '/fleet-dashboard.html') {
-    setSecurityHeaders(res);
-    setCors(req, res);
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.end(getDashboardHtml());
-    return;
-  }
-
-  const safePath = path.normalize(reqPath).replace(/^\/+/, '');
-  const filePath = path.join(ROOT, safePath);
-
-  if (!filePath.startsWith(ROOT)) {
-    send(res, 403, 'Forbidden');
-    return;
-  }
-
-  // Block sensitive files
-  const base = path.basename(filePath);
-  if (base.startsWith('.') || base === 'server.js' || base === 'dev-server.js' || base.endsWith('.md') || base === 'package.json') {
-    send(res, 404, 'Not found');
-    return;
-  }
-
-  fs.readFile(filePath, (err, data) => {
-    if (err) { send(res, 404, 'Not found'); return; }
-    const ext = path.extname(filePath).toLowerCase();
-    setSecurityHeaders(res);
-    setCors(req, res);
-    res.statusCode = 200;
-    res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    res.end(data);
-  });
-}
-
-/* ── API proxy ─────────────────────────────────────────── */
-
-function proxyToGpsApi(req, res) {
-  if (req.method === 'OPTIONS') {
-    res.statusCode = 204;
-    setCors(req, res);
-    res.end();
-    return;
-  }
-
-  const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  const apiPath = parsed.pathname.replace(/^\/gps-api/, '') + (parsed.search || '');
-  const target = new URL(apiPath, API_ORIGIN);
-
-  const headers = { ...req.headers };
-  delete headers.host;
-  delete headers.origin;
-  delete headers.referer;
-
-  const upstream = https.request(target, {
-    method: req.method,
-    headers
-  }, (up) => {
-    res.statusCode = up.statusCode || 502;
-    for (const [k, v] of Object.entries(up.headers)) {
-      const lk = k.toLowerCase();
-      if (lk === 'content-security-policy') continue;
-      if (lk === 'access-control-allow-origin') continue;
-      if (v !== undefined) res.setHeader(k, v);
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://local');
+    securityHeaders(res, cfg.env === 'production');
+    if (url.pathname === '/health' || url.pathname === '/healthz') {
+      return json(res, 200, { status: 'ok', version, uptime: Math.round(process.uptime()), gps: poller ? !!poller.lastOk : null, nvr: gate ? !!gate.nvr.lastOk : null });
     }
-    setCors(req, res);
-    up.pipe(res);
+    if (url.pathname.startsWith('/api/')) return api(req, res, url);
+    if (req.method !== 'GET' && req.method !== 'HEAD') { res.statusCode = 405; return res.end(); }
+    if (url.pathname.startsWith('/vendor/leaflet/')) {
+      if (serveFile(req, res, leafletDir, url.pathname.slice('/vendor/leaflet/'.length), { cache: 'public, max-age=604800' })) return;
+    } else if (url.pathname !== '/' && url.pathname !== '/index.html') {
+      const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+      const cache = rel === 'sw.js' ? 'no-cache' : 'public, max-age=300';
+      if (serveFile(req, res, publicDir, rel, { cache })) return;
+      if (path.extname(rel)) { res.statusCode = 404; return res.end('Not found'); }
+    }
+    serveFile(req, res, publicDir, 'index.html', { cache: 'no-cache' });
   });
 
-  upstream.on('error', (err) => {
-    log(`Proxy error: ${err.message}`);
-    send(res, 502, JSON.stringify({ error: 'Proxy error' }), 'application/json; charset=utf-8');
-  });
+  if (cfg.mock) await seedMock(ctx);
+  server.listen(cfg.port, cfg.host, () => log.info(`TBB Dispatcher ${version} on http://${cfg.host}:${cfg.port} [${cfg.env}]`));
 
-  req.pipe(upstream);
-}
+  push.start();
+  rules.start();
+  if (poller) poller.start();
+  analytics.start();
+  if (gate) {
+    // Let the poller load the vehicle list first so plate matching works from the start.
+    setTimeout(() => gate.start()
+      .then(async (imported) => {
+        // Camera history arrived after the first rollups: recompute the camera columns of those days.
+        if (!imported) return;
+        const T = require('./src/time');
+        for (const day of T.daysBetween(T.dayOf(imported.since), T.today())) await analytics.rollup(day, { withGps: false });
+        log.info('camera history: daily trip counts updated');
+      })
+      .catch((e) => log.error(`camera pipeline: ${e.stack || e.message}`)), poller ? 4000 : 0);
+  }
 
-/* ── Health check ──────────────────────────────────────── */
-
-function handleHealth(_req, res) {
-  const payload = {
-    status: 'ok',
-    uptime: Math.floor(process.uptime()),
-    timestamp: new Date().toISOString(),
-    env: NODE_ENV
+  const shutdown = (sig) => {
+    log.info(`${sig}: shutting down`);
+    poller?.stop(); gate?.stop(); analytics.stop(); rules.stop();
+    server.close(() => { ctx.db.close(); process.exit(0); });
+    setTimeout(() => process.exit(0), 5000).unref();
   };
-  send(res, 200, JSON.stringify(payload), 'application/json; charset=utf-8');
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  return { server, ctx };
 }
 
-/* ── Router ────────────────────────────────────────────── */
-
-const server = http.createServer((req, res) => {
-  const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  const pathname = parsed.pathname;
-
-  if (pathname === '/health' || pathname === '/healthz') {
-    handleHealth(req, res);
-    return;
-  }
-  if (pathname.startsWith('/gps-api/')) {
-    proxyToGpsApi(req, res);
-    return;
-  }
-  serveStatic(req, res);
-});
-
-/* ── Graceful shutdown ─────────────────────────────────── */
-
-function shutdown(signal) {
-  log(`Received ${signal}, shutting down gracefully…`);
-  server.close(() => {
-    log('Server closed.');
-    process.exit(0);
+/** Demo database: vehicle types, a few users, and today's / yesterday's positions so tracks aren't empty. */
+async function seedMock(ctx) {
+  const { h, poller, sim } = ctx;
+  if (h.kvGet('mock_seeded')) return;
+  await poller.syncVehicles();
+  for (const [id, type] of Object.entries(ctxSeed.MOCK_TYPES)) h.run('UPDATE vehicles SET type = ? WHERE id = ?', type, Number(id));
+  if (!h.get("SELECT 1 FROM users WHERE username = 'owner'")) ctx.auth.createUser({ username: 'owner', name: 'Rahbar (demo)', role: 'owner', password: 'owner12345' });
+  if (!h.get("SELECT 1 FROM users WHERE username = 'dispatcher'")) ctx.auth.createUser({ username: 'dispatcher', name: 'Dispetcher (demo)', role: 'dispatcher', password: 'dispatcher123' });
+  const { FLEET } = require('./src/mock/sim');
+  const { haversineM } = require('./src/gps/normalize');
+  const T = require('./src/time');
+  const from = T.dayStart(T.addDays(T.today(), -1)), to = Date.now() - 60e3;
+  h.tx(() => {
+    for (const [id] of FLEET) {
+      if (id === 22238 || id === 22871) continue;
+      let inside = null, visit = null;
+      for (let t = from; t < to; t += 30e3) {
+        const p = sim.position(id, t);
+        const status = p.state === 4 ? 'moving' : p.state === 2 ? 'idle' : 'stopped';
+        if (status === 'moving' || t % 120e3 < 30e3) h.run('INSERT OR IGNORE INTO positions VALUES (?, ?, ?, ?, ?, ?, ?)', id, t, p.lat, p.lng, p.speed, p.course, status);
+        const inYard = haversineM(p.lat, p.lng, ctx.config.yard.lat, ctx.config.yard.lng) <= ctx.config.yard.radiusM;
+        if (inYard && !inside) visit = Number(h.run('INSERT INTO yard_visits (vehicle_id, enter_t, approx) VALUES (?, ?, ?)', id, t, inside === null ? 1 : 0).lastInsertRowid);
+        if (!inYard && inside) h.run('UPDATE yard_visits SET exit_t = ? WHERE id = ?', t, visit);
+        inside = inYard;
+      }
+    }
   });
-  setTimeout(() => { process.exit(1); }, 5000);
+  for (const r of h.all('SELECT id, vehicle_id, enter_t FROM yard_visits WHERE exit_t IS NULL')) poller.openVisit.set(r.vehicle_id, { id: r.id, enter_t: r.enter_t });
+  h.kvSet('mock_seeded', true);
+  ctx.log.info('MOCK: demo users owner/owner12345 and dispatcher/dispatcher123');
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+if (require.main === module) start();
 
-/* ── Start ─────────────────────────────────────────────── */
-
-if (!GPS_LOGIN || !GPS_PASSWORD) {
-  log('WARNING: GPS_LOGIN and/or GPS_PASSWORD not set — auto-login will fail.');
-}
-
-server.listen(PORT, HOST, () => {
-  log(`Server running on http://${HOST}:${PORT} [${NODE_ENV}]`);
-  log(`Health check: http://127.0.0.1:${PORT}/health`);
-  log(`API proxy:    http://127.0.0.1:${PORT}/gps-api`);
-});
+module.exports = { start, build };

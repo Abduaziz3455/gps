@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>TBB Dispatcher</title>
+  <meta name="description" content="Avtopark: jonli xarita, darvoza kameralari, tahlil" />
+  <meta name="theme-color" content="#0f1720" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/css/app.css?v=2.0.0" />
+  <script src="/js/theme.js"></script>
+</head>
+<body>
+  <div id="boot" class="boot"><div class="spinner" aria-hidden="true"></div><span>Yuklanmoqda…</span></div>
+
+  <section id="login" class="login" hidden>
+    <form id="loginForm" class="login-card" autocomplete="on">
+      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span><span>TBB <b>Dispatcher</b></span></div>
+      <p class="muted">Avtopark nazorati: jonli xarita, darvoza kameralari va tahlil.</p>
+      <label class="field"><span>Login</span><input name="username" autocomplete="username" required autofocus /></label>
+      <label class="field"><span>Parol</span><input name="password" type="password" autocomplete="current-password" required /></label>
+      <p id="loginError" class="form-error" role="alert" hidden></p>
+      <button class="btn btn-primary btn-block" type="submit">Kirish</button>
+    </form>
+  </section>
+
+  <div id="app" class="app" hidden>
+    <aside class="sidebar" aria-label="Asosiy menyu">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="brand-text">TBB <b>Dispatcher</b></span></div>
+      <nav id="nav" class="nav"></nav>
+      <div class="sidebar-foot">
+        <div id="healthBox" class="health" title="Tizim holati"></div>
+      </div>
+    </aside>
+    <header class="topbar">
+      <h1 id="pageTitle" class="page-title">…</h1>
+      <div class="topbar-right">
+        <span id="clock" class="clock" aria-label="Toshkent vaqti"></span>
+        <a id="bell" class="icon-btn bell" href="#/ogohlantirish" title="Ogohlantirishlar" aria-label="Ogohlantirishlar"><span class="i i-bell"></span><span id="bellCount" class="badge" hidden>0</span></a>
+        <button id="themeBtn" class="icon-btn" type="button" title="Mavzu" aria-label="Yorug'/qorong'i mavzu"><span class="i i-theme"></span></button>
+        <div class="user-menu">
+          <button id="userBtn" class="user-btn" type="button" aria-haspopup="true" aria-expanded="false"><span id="userAvatar" class="avatar"></span><span id="userName" class="user-name"></span></button>
+          <div id="userDrop" class="dropdown" hidden>
+            <div id="userRole" class="dropdown-head"></div>
+            <a href="#/sozlamalar">Sozlamalar</a>
+            <button id="logoutBtn" type="button">Chiqish</button>
+          </div>
+        </div>
+      </div>
+    </header>
+    <main id="main" class="main" tabindex="-1"></main>
+    <nav id="tabbar" class="tabbar" aria-label="Menyu"></nav>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="modalRoot"></div>
+
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="/js/main.js?v=2.0.0"></script>
+</body>
+</html>
