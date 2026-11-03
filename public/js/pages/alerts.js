@@ -36,7 +36,7 @@ const rowHtml = (a) => {
 
 export default {
   async render(main, { query }) {
-    const types = Object.keys(ALERT_TYPES).filter((t) => t !== 'system' || state.isOwner);
+    const types = Object.keys(ALERT_TYPES);
     let filter = {
       state: query.state === 'all' ? 'all' : 'open',
       type: types.includes(query.type) ? query.type : '',

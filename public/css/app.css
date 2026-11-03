@@ -137,8 +137,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-2); 
 .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
 
 /* app layout */
-.app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; grid-template-rows: var(--topbar-h) 1fr; height: 100vh; height: 100dvh; }
-.sidebar { grid-row: 1 / span 2; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 14px 10px; gap: 14px; min-height: 0; }
+.app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; grid-template-rows: var(--topbar-h) auto 1fr; height: 100vh; height: 100dvh; }
+.sidebar { grid-row: 1 / span 3; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 14px 10px; gap: 14px; min-height: 0; }
 .sidebar .brand { padding: 4px 8px 8px; }
 .nav { display: grid; gap: 2px; }
 .nav a { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--text-2); font-weight: 600; }
@@ -254,6 +254,15 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
 .kv dt { color: var(--text-3); }
 .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+/* system banner (problems found by the server, or this device / our server unreachable) */
+.sys-banner { display: grid; gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); min-width: 0; }
+.sys-item { display: grid; grid-template-columns: 20px 1fr; gap: 10px; padding: 9px 16px; background: var(--bad-soft); color: var(--text); font-size: 13px; }
+.sys-item.warn { background: var(--warn-soft); }
+.sys-item .i { color: var(--bad); margin-top: 1px; }
+.sys-item.warn .i { color: var(--warn); }
+.sys-since { color: var(--text-3); font-weight: 400; }
+.sys-text { color: var(--text-2); }
 
 /* ---------- live map page ---------- */
 .live { display: grid; grid-template-columns: 360px 1fr; height: 100%; min-height: 0; }
@@ -390,7 +399,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 }
 @media (max-width: 900px) {
   :root { --topbar-h: 52px; }
-  .app { grid-template-columns: 1fr; grid-template-rows: var(--topbar-h) 1fr auto; }
+  .app { grid-template-columns: 1fr; grid-template-rows: var(--topbar-h) auto 1fr auto; }
   .sidebar { display: none; }
   .tabbar { display: flex; background: var(--surface); border-top: 1px solid var(--border); padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); justify-content: space-around; }
   .tabbar a { flex: 1; display: grid; justify-items: center; gap: 2px; font-size: 10.5px; font-weight: 650; color: var(--text-3); padding: 6px 2px; border-radius: 8px; position: relative; }

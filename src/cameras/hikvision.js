@@ -98,6 +98,23 @@ class NVR {
     return (await this._req('/ISAPI/System/deviceInfo')).body.toString('utf8');
   }
 
+  /** Quick reachability check for the health monitor: deviceInfo with a short timeout. */
+  async ping() {
+    return (await this._req('/ISAPI/System/deviceInfo', { timeoutMs: 10000 })).status;
+  }
+
+  /** {channelId: online} of the NVR's IP camera channels (false: camera off or cable unplugged). */
+  async channelStatus() {
+    const xml = (await this._req('/ISAPI/ContentMgmt/InputProxy/channels/status', { timeoutMs: 15000 })).body.toString('utf8');
+    const out = {};
+    for (const [, block] of xml.matchAll(/<InputProxyChannelStatus[^>]*>([\s\S]*?)<\/InputProxyChannelStatus>/g)) {
+      const id = /<id>(\d+)<\/id>/.exec(block);
+      const online = /<online>(true|false)<\/online>/.exec(block);
+      if (id && online) out[Number(id[1])] = online[1] === 'true';
+    }
+    return out;
+  }
+
   /** {channelId: name} of the NVR's IP camera channels. */
   async channels() {
     const xml = (await this._req('/ISAPI/ContentMgmt/InputProxy/channels')).body.toString('utf8');

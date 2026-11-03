@@ -1,6 +1,6 @@
 // App shell: login, role-aware navigation, hash router, live stream, header widgets.
 import { api, get, post, state, connectStream } from './api.js';
-import { $, $$, html, icon, setHtml, toast, hm, hms, ago, esc } from './ui.js';
+import { $, $$, html, icon, setHtml, toast, hm, hms, when, esc } from './ui.js';
 
 const PAGES = [
   { path: 'xarita', title: 'Jonli xarita', label: 'Xarita', icon: 'map', load: () => import('./pages/live.js') },
@@ -128,7 +128,14 @@ function wireLive() {
   });
   state.on('alert:update', () => refreshAlertsCount());
   state.on('health', (h) => renderHealth(h));
-  state.on('stream', (ok) => { state.streamOk = ok; renderHealth(state.health); });
+  state.on('stream', (ok) => {
+    state.streamOk = ok;
+    if (ok) streamLostAt = null; else if (!streamLostAt) { streamLostAt = Date.now(); setTimeout(renderBanner, 16e3); }
+    renderHealth(state.health);
+  });
+  window.addEventListener('online', renderBanner);
+  window.addEventListener('offline', renderBanner);
+  setInterval(() => get('/api/health').then(renderHealth).catch(() => renderBanner()), 60e3);
   get('/api/health').then(renderHealth).catch(() => {});
 }
 
@@ -147,18 +154,40 @@ function renderBadges() {
   }
 }
 
+const STATE_DOT = { ok: 'ok', warn: 'warn', bad: 'bad' };
+
+/** Sidebar status box + the banner over every page. Problems are worded by the server (src/health.js). */
 function renderHealth(h) {
   if (h) state.health = h;
   h = state.health;
-  const now = Date.now();
   const row = (label, cls, title) => html`<div class="health-row" title="${title}"><span class="dot ${cls}"></span><span>${label}</span></div>`;
-  const rows = [];
-  rows.push(row('Jonli aloqa', state.streamOk === false ? 'bad' : 'ok', state.streamOk === false ? 'Qayta ulanmoqda…' : 'Ulangan'));
-  if (h?.gps) { const age = h.gps.lastOk ? now - h.gps.lastOk : Infinity; rows.push(row(`GPS · ${h.gps.lastOk ? ago(h.gps.lastOk) : "yo'q"}`, age < 60e3 ? 'ok' : age < 300e3 ? 'warn' : 'bad', h.gps.error || 'GoGPS')); }
-  else rows.push(row('GPS ulanmagan', '', ''));
-  if (h?.nvr) { const age = h.nvr.lastOk ? now - h.nvr.lastOk : Infinity; rows.push(row(`Kameralar · ${h.nvr.lastOk ? ago(h.nvr.lastOk) : "yo'q"}`, age < 120e3 ? 'ok' : age < 600e3 ? 'warn' : 'bad', h.nvr.error || 'NVR')); }
-  else rows.push(row('Kameralar ulanmagan', '', ''));
+  const rows = [row('Jonli aloqa', state.streamOk === false ? 'bad' : 'ok', state.streamOk === false ? 'Qayta ulanmoqda…' : 'Ulangan')];
+  for (const p of h?.status?.parts || []) {
+    rows.push(row(p.state === 'ok' ? p.label : `${p.label} — ${p.state === 'warn' ? 'muammo bor' : 'ishlamayapti'}`, STATE_DOT[p.state] || '', p.detail || p.text));
+  }
+  if (!h?.status) {
+    if (!h?.gps) rows.push(row('GPS ulanmagan', '', ''));
+    if (!h?.nvr) rows.push(row('Kameralar ulanmagan', '', ''));
+  }
   setHtml($('#healthBox'), html`${rows}`);
+  renderBanner();
+}
+
+let streamLostAt = null;
+/** Banner: this device offline > our server unreachable > problems the server found. */
+function renderBanner() {
+  const el = $('#sysBanner');
+  if (!el) return;
+  let items = [];
+  if (!navigator.onLine) {
+    items = [{ cls: 'bad', title: "Qurilmangizda internet yo'q", text: "Wi-Fi yoki mobil internetni tekshiring. Ma'lumotlar yangilanmayapti." }];
+  } else if (state.streamOk === false && streamLostAt && Date.now() - streamLostAt > 15e3) {
+    items = [{ cls: 'bad', title: "Dispatcher serveri bilan aloqa yo'q", text: "Sizning internetingiz ishlayapti, lekin server javob bermayapti: server o'chgan yoki qayta ishga tushmoqda. Qayta ulanmoqda…" }];
+  } else {
+    items = (state.health?.status?.problems || []).map((p) => ({ cls: p.severity === 'critical' ? 'bad' : 'warn', title: p.title, text: p.text, since: p.since }));
+  }
+  el.hidden = !items.length;
+  setHtml(el, html`${items.slice(0, 3).map((i) => html`<div class="sys-item ${i.cls}">${icon('alert')}<div><b>${i.title}</b>${i.since ? html` <span class="sys-since">· ${when(i.since)} dan beri</span>` : ''}<div class="sys-text">${i.text}</div></div></div>`)}`);
 }
 
 function tickClock() {

@@ -169,7 +169,7 @@ Hisobot table and on each vehicle's page.
 | Speeding | > 80 km/h in 2 consecutive samples | yes |
 | No GPS signal | > 30 min for a vehicle active in the last 7 days | once per outage |
 | Long stop outside the yard | parked > 90 min outside the yard, 06:00–22:00 | yes |
-| NVR / GPS unreachable | > 5 min | owner |
+| System health (section 7a) | a problem lasting ~3 min; recovery with the period | everyone |
 
 Delivery is **Web Push** (VAPID): Chrome / Edge / Firefox on desktop and Android, and iPhone (iOS 16.4+) once
 the site is added to the home screen (manifest + service worker included). Entry and exit notifications carry
@@ -177,6 +177,36 @@ the plate photo (Android/desktop) and open the event on tap. Open tabs get every
 
 Timing: entries are pushed right away; exits of fleet vehicles after GPS confirms the departure (usually
 within a minute; vetoed maneuvers are never pushed); unread plates after the 90 s GPS match.
+
+## 7a. System health: which link is broken
+
+`src/health.js` checks every minute and names the broken link in plain words (Uzbek), so the person reading it
+knows whom to call:
+
+| What it sees | Message (short) | Who fixes it |
+|---|---|---|
+| This server can't reach the internet (1.1.1.1 / 8.8.8.8 don't answer) | "Dispatcher serverida internet yo'q" — not a plant problem | hosting provider |
+| GoGPS refuses the login | "GPS tizimiga kirib bo'lmayapti" — password changed | owner: update `GPS_PASSWORD` |
+| GoGPS doesn't answer, our internet works | "GPS xizmati javob bermayapti" | GoGPS |
+| NVR port refused (the plant's router answered) | "NVR javob bermayapti" — NVR off/rebooting, or port forwarding changed | plant: NVR |
+| Nothing answers; router probe (`SITE_ROUTER`) also silent | "Zavodda internet yo'q" — provider, Wi-Fi/router or power | plant: internet |
+| Nothing answers; router answers | "NVR javob bermayapti" — NVR off, hung or unplugged | plant: NVR |
+| Nothing answers, no router probe configured | "Zavoddagi kameralarga ulanib bo'lmayapti" — internet, power or NVR, internet first | plant |
+| NVR refuses the password | "NVR parolni qabul qilmadi" | owner: update `NVR_PASSWORD` |
+| NVR says a camera channel is offline | "ANPR-1 kamerasi o'chgan" — camera power/cable | plant: camera |
+| GPS saw ≥ 3 trucks cross the gate in 90 min, the camera recorded none | "ANPR-2 kamerasi mashinalarni yozmayapti" — dirty/turned lens, ANPR off | plant: camera |
+| Disk < 1 GB or < 5% | "Serverda joy tugayapti" | owner / hosting |
+| This server was off (heartbeat gap > 3 min) | "Dispatcher tizimi ishlamay qoldi: 10:02–10:15", reported after restart | — |
+
+Our server's own internet is checked first; while it is down nothing else is judged (and no push can be
+sent; the recovery message carries the period). A problem is reported when it lasts 3 checks (~3 min) and is
+closed with "✅ Tiklandi … Ishlamagan vaqt: 10:02–10:15" after 2 good checks; the closing also marks the outage
+alert as seen. The banner over every page shows active problems; the app itself says when the *viewer's*
+device is offline ("Qurilmangizda internet yo'q") or our server can't be reached ("Dispatcher serveri bilan
+aloqa yo'q"). System messages go to everyone and ignore quiet hours (per-device switch "Tizim holati").
+
+When this server is completely down nobody inside it can send anything: an outside uptime check on
+`https://tbbdispatcher.uz/health` (START_PROJECT.md) covers that.
 
 ## 8. Security
 

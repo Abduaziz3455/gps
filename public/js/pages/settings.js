@@ -13,7 +13,7 @@ const TABS = [
 ];
 const ROLE = { owner: 'Rahbar', dispatcher: 'Dispetcher' };
 const VTYPES = { auto: 'Avto', mixer: 'Mikser', dump: 'Samosval', excavator: 'Ekskavator', car: 'Yengil', other: 'Boshqa' };
-const DEFAULT_PREFS = { gateIn: true, gateOut: true, onlyFleet: false, alerts: true, quietFrom: '', quietTo: '' };
+const DEFAULT_PREFS = { gateIn: true, gateOut: true, onlyFleet: false, alerts: true, system: true, quietFrom: '', quietTo: '' };
 
 export default {
   async render(main, { query }) {
@@ -183,6 +183,7 @@ async function renderPush(panel) {
           <div class="setting-row"><div><div><b>Chiqishlar</b></div><div class="small muted">GPS chiqishni tasdiqlagandan keyin</div></div>${switchHtml('gateOut', prefs.gateOut, 'Chiqishlar')}</div>
           <div class="setting-row"><div><div><b>Faqat o'z transportlarimiz</b></div><div class="small muted">Begona mashinalar va o'qilmagan raqamlar haqida xabar bermaslik</div></div>${switchHtml('onlyFleet', prefs.onlyFleet, "Faqat o'z transportlarimiz")}</div>
           <div class="setting-row"><div><div><b>Ogohlantirishlar (yoqilg'i to'kilishi, tezlik, signal yo'q…)</b></div><div class="small muted">Qoidalar bo'yicha ogohlantirishlar</div></div>${switchHtml('alerts', prefs.alerts, 'Ogohlantirishlar')}</div>
+          <div class="setting-row"><div><div><b>Tizim holati (kameralar, internet, GPS)</b></div><div class="small muted">Kamera, NVR, zavod interneti yoki GPS ishlamay qolsa — sababi bilan; tiklanganda ham xabar keladi. Tinch soatlarda ham yuboriladi</div></div>${switchHtml('system', prefs.system, 'Tizim holati')}</div>
           <div class="setting-row" style="flex-wrap:wrap">
             <div><div><b>Tinch soatlar</b></div><div class="small muted">Bu oraliqda bildirishnoma kelmaydi (masalan, 22:00 – 07:00)</div></div>
             <div style="display:flex;gap:6px;align-items:center">

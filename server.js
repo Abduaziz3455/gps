@@ -18,6 +18,7 @@ const { Gate } = require('./src/gate');
 const { Analytics } = require('./src/analytics');
 const { Rules } = require('./src/rules');
 const { Push } = require('./src/push');
+const { Health } = require('./src/health');
 const { buildApi, apiHandler } = require('./src/api');
 const { serveFile, securityHeaders, json } = require('./src/http');
 
@@ -45,8 +46,8 @@ function build() {
   if (config.mock) {
     const { Sim, MockGps, MockNvr, MOCK_TYPES } = require('./src/mock/sim');
     sim = new Sim({ yard: config.yard });
-    gps = new MockGps({ sim });
-    nvr = new MockNvr({ sim, cameras: config.nvr.cameras });
+    gps = new MockGps({ sim, dataDir: config.dataDir });
+    nvr = new MockNvr({ sim, cameras: config.nvr.cameras, dataDir: config.dataDir });
     log.warn('MOCK mode: simulated GPS and cameras (demo data)');
     ctxSeed = { MOCK_TYPES };
   } else {
@@ -74,7 +75,10 @@ function build() {
   const analytics = new Analytics({ h, gps, config, log });
   const rules = new Rules({ h, config, poller, gate, log });
   const push = new Push({ h, config, log });
-  const ctx = { h, db, config, auth, gps, nvr, poller, gate, analytics, rules, push, sim, log };
+  // In MOCK mode the internet probe is simulated too (see src/mock/sim.js mockFail).
+  const probe = config.mock ? async () => ({ ok: require('./src/mock/sim').mockFail(config.dataDir) !== 'internet' }) : undefined;
+  const health = new Health({ h, config, poller, gate, rules, log, ...(probe ? { probe } : {}) });
+  const ctx = { h, db, config, auth, gps, nvr, poller, gate, analytics, rules, push, health, sim, log };
   return ctx;
 }
 
@@ -82,7 +86,7 @@ let ctxSeed = null;
 
 async function start() {
   const ctx = build();
-  const { config: cfg, poller, gate, analytics, rules, push, h } = ctx;
+  const { config: cfg, poller, gate, analytics, rules, push, health, h } = ctx;
   const api = apiHandler(ctx, buildApi(ctx));
   const publicDir = path.join(__dirname, 'public');
   const leafletDir = path.join(__dirname, 'node_modules', 'leaflet', 'dist');
@@ -112,6 +116,7 @@ async function start() {
 
   push.start();
   rules.start();
+  health.start();
   if (poller) poller.start();
   analytics.start();
   if (gate) {
@@ -129,7 +134,8 @@ async function start() {
 
   const shutdown = (sig) => {
     log.info(`${sig}: shutting down`);
-    poller?.stop(); gate?.stop(); analytics.stop(); rules.stop();
+    poller?.stop(); gate?.stop(); analytics.stop(); rules.stop(); health.stop();
+    h.kvSet('alive_at', Date.now()); // the outage report after restart counts from this moment
     server.close(() => { ctx.db.close(); process.exit(0); });
     setTimeout(() => process.exit(0), 5000).unref();
   };

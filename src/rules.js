@@ -5,7 +5,7 @@
  *   speeding    over the limit in 2 consecutive polls (once per 30 min)    warning
  *   no_signal   no GPS record for OFFLINE_MINUTES, vehicle active in 7 d   warning (once per outage)
  *   long_stop   parked outside the yard longer than LONG_STOP_MINUTES      info    (work hours only)
- *   system      NVR / GPS unreachable for 5 min                            critical (owners)
+ * System health (NVR, GPS, internet, cameras, our server) is src/health.js; it raises its alerts through raise().
  */
 const bus = require('./bus');
 const T = require('./time');
@@ -20,7 +20,6 @@ class Rules {
     this.log = log;
     this.over = new Map(); // vehicleId -> consecutive polls over the limit
     this.movingAt = new Map(); // vehicleId -> last record time while moving
-    this.down = {}; // system -> since
     this.timer = null;
   }
 
@@ -42,7 +41,7 @@ class Rules {
     return {
       id: r.id, type: r.type, severity: r.severity, vehicleId: r.vehicle_id, vehicleLabel: r.vehicle_id ? this.label(r.vehicle_id) : null,
       t: r.t, title: r.title, body: r.body, data: r.data ? JSON.parse(r.data) : null, ackedAt: r.acked_at,
-      ackedBy: r.acked_by ? this.h.get('SELECT name FROM users WHERE id = ?', r.acked_by)?.name : null,
+      ackedBy: r.acked_by ? this.h.get('SELECT name FROM users WHERE id = ?', r.acked_by)?.name : r.acked_at ? 'Tizim (tiklandi)' : null,
     };
   }
 
@@ -72,7 +71,7 @@ class Rules {
     });
   }
 
-  /** Periodic checks: no signal, long stops, system health. */
+  /** Periodic checks: no signal, long stops. */
   check(now = Date.now()) {
     const offMs = this.cfg.gps.offlineMinutes * 60e3;
     const since = T.addDays(T.today(now), -7);
@@ -98,23 +97,6 @@ class Rules {
             data: { lat: p.lat, lng: p.lng },
           });
         }
-      }
-    }
-    const systems = {
-      gps: this.poller ? (this.poller.lastOk ? now - this.poller.lastOk : Infinity) : null,
-      nvr: this.gate ? (this.gate.nvr.lastOk ? now - this.gate.nvr.lastOk : Infinity) : null,
-    };
-    for (const [name, age] of Object.entries(systems)) {
-      if (age === null) continue;
-      if (age > 5 * 60e3 && this.started && now - this.started > 5 * 60e3) {
-        this.down[name] ||= now - Math.min(age, now - this.started);
-        this.raise({
-          key: `system:${name}:${this.down[name]}`, type: 'system', severity: 'critical', t: now,
-          title: name === 'gps' ? "GPS (GoGPS) bilan aloqa yo'q" : "Kameralar (NVR) bilan aloqa yo'q",
-          body: `${T.localIso(this.down[name]).slice(11, 16)} dan beri`,
-        });
-      } else if (age <= 5 * 60e3 && this.down[name]) {
-        delete this.down[name];
       }
     }
   }

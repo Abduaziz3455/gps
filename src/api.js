@@ -15,7 +15,7 @@ const VEHICLE_TYPES = ['auto', 'mixer', 'dump', 'excavator', 'car', 'other'];
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function buildApi(ctx) {
-  const { h, config, auth, poller, gate, analytics, rules, push, gps } = ctx;
+  const { h, config, auth, poller, gate, analytics, rules, push, gps, health: monitor } = ctx;
   const r = new Router();
 
   // --- guards ----------------------------------------------------------------------------------
@@ -280,7 +280,6 @@ function buildApi(ctx) {
     if (q.state === 'open') where.push('acked_at IS NULL');
     if (q.type) { where.push('type = ?'); args.push(String(q.type)); }
     if (q.vehicle) { where.push('vehicle_id = ?'); args.push(Number(q.vehicle)); }
-    if (req.user.role !== 'owner') where.push("type != 'system'");
     const limit = Math.min(500, Number(q.limit) || 200);
     return h.all(`SELECT * FROM alerts ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY t DESC LIMIT ?`, ...args, limit).map((a) => rules.view(a));
   });
@@ -293,7 +292,7 @@ function buildApi(ctx) {
   });
   r.post('/api/alerts/ack-all', (req) => {
     user(req);
-    const n = h.run(`UPDATE alerts SET acked_by = ?, acked_at = ? WHERE acked_at IS NULL ${req.user.role !== 'owner' ? "AND type != 'system'" : ''}`, req.user.id, Date.now()).changes;
+    const n = h.run(`UPDATE alerts SET acked_by = ?, acked_at = ? WHERE acked_at IS NULL`, req.user.id, Date.now()).changes;
     bus.emit('alert:update', null);
     return { acked: n };
   });
@@ -370,6 +369,7 @@ function buildApi(ctx) {
     gps: poller ? { lastOk: poller.lastOk || null, error: poller.lastError, vehicles: poller.live.size } : null,
     nvr: gate ? gate.health() : null,
     rollupAt: h.kvGet('rollup_at'),
+    status: monitor ? monitor.summary() : null, // plain-language state of each part + active problems
   });
   r.get('/api/health', (req) => { user(req); return health(); });
   r.get('/api/system', (req) => {
@@ -392,7 +392,6 @@ function buildApi(ctx) {
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     res.write('retry: 5000\n\n');
     send('hello', { time: Date.now() });
-    const isOwner = req.user.role === 'owner';
     const vehiclesById = () => new Map(vehicleRows().map((v) => [v.id, v]));
     let vmap = vehiclesById();
     const handlers = {
@@ -400,7 +399,7 @@ function buildApi(ctx) {
       vehicles: () => { vmap = vehiclesById(); send('vehicles', {}); },
       gate: (ev) => send('gate', ev),
       'gate:update': (ev) => send('gate:update', ev),
-      alert: (a) => { if (a.type !== 'system' || isOwner) send('alert', a); },
+      alert: (a) => send('alert', a),
       'alert:update': (a) => send('alert:update', a),
       health: () => send('health', health()),
     };

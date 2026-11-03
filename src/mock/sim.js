@@ -126,9 +126,15 @@ class Sim {
 
 /** Fake GoGPS client with the same interface as GpsClient. */
 class MockGps {
-  constructor({ sim }) { this.sim = sim; this.lastOk = 0; this.lastError = null; }
+  constructor({ sim, dataDir = '' }) { this.sim = sim; this.dataDir = dataDir; this.lastOk = 0; this.lastError = null; }
+  _check() {
+    const f = mockFail(this.dataDir);
+    if (f === 'internet' || f === 'gps_down') throw new Error('/api/v3/vehicles/getlastdata: timeout');
+    if (f === 'gps_auth') throw new Error('GPS login failed (HTTP 401)');
+  }
   async vehicles() { this.lastOk = Date.now(); return FLEET.map(([id, name, model]) => ({ id, guid: null, name, model })); }
   async lastData(ids) {
+    this._check();
     const now = Date.now();
     this.lastOk = now;
     return ids.map((id) => {
@@ -202,10 +208,20 @@ class MockGps {
   }
 }
 
+/**
+ * Simulated failures for trying the health monitor: write one word into <DATA_DIR>/mock_fail
+ * (internet, site, nvr_off, nvr_auth, camera_off, camera_blind, gps_down, gps_auth); delete the file to recover.
+ */
+function mockFail(dataDir) {
+  try { return require('node:fs').readFileSync(require('node:path').join(dataDir, 'mock_fail'), 'utf8').trim(); } catch { return ''; }
+}
+const netError = (code, msg) => Object.assign(new Error(msg || code), { code });
+
 /** Fake NVR: captures at every yard crossing in the plans, plus outside vehicles. Same interface as NVR. */
 class MockNvr {
-  constructor({ sim, cameras }) {
+  constructor({ sim, cameras, dataDir = '' }) {
     this.sim = sim;
+    this.dataDir = dataDir;
     this.inCam = cameras.find((c) => c.direction === 'in');
     this.outCam = cameras.find((c) => c.direction === 'out');
     this.lastOk = 0;
@@ -237,7 +253,21 @@ class MockNvr {
     }
     return caps.map((c) => ({ ...c, uriPath: `/mock/picture?name=${c.name}` }));
   }
+  _check() {
+    const f = mockFail(this.dataDir);
+    if (f === 'site' || f === 'internet') throw netError('ETIMEDOUT', 'NVR GET /ISAPI: timed out after 10000 ms');
+    if (f === 'nvr_off') throw netError('ECONNREFUSED');
+    if (f === 'nvr_auth') throw Object.assign(new Error('NVR GET: HTTP 401'), { status: 401 });
+  }
+  async ping() { this._check(); this.lastOk = Date.now(); return 200; }
+  async channelStatus() {
+    this._check();
+    const f = mockFail(this.dataDir);
+    return { 3: true, 4: f !== 'camera_off', 5: true, 6: true };
+  }
   async searchCaptures(channel, from, to) {
+    this._check();
+    if (mockFail(this.dataDir) === 'camera_blind' && channel === this.inCam.channel) return [];
     this.lastOk = Date.now();
     return this._caps(from, Math.min(to, Date.now())).filter((c) => c.channel === channel).sort((a, b) => a.time - b.time);
   }
@@ -282,4 +312,4 @@ async function image(plate, caption, anpr) {
 /** Starting vehicle types for the demo database. */
 const MOCK_TYPES = { 22077: 'dump', 22078: 'dump', 21389: 'dump', 22238: 'dump', 22871: 'dump', 21390: 'dump', 22872: 'excavator' };
 
-module.exports = { Sim, MockGps, MockNvr, MOCK_TYPES, FLEET };
+module.exports = { Sim, MockGps, MockNvr, MOCK_TYPES, FLEET, mockFail };

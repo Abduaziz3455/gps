@@ -66,6 +66,11 @@ cp nginx.conf /etc/nginx/sites-available/tbbdispatcher.uz && nginx -t && systemc
 4. Phones: open the site, add it to the Home Screen (iPhone: Share → Add to Home Screen), Settings →
    Notifications → Turn on.
 5. Remove `OWNER_PASSWORD` from `.env`.
+6. Optional, recommended: an outside uptime check, for the one case the server can't report itself (it is
+   completely down). Any free monitor (UptimeRobot, Better Stack…) on `https://tbbdispatcher.uz/health`
+   every 5 minutes, alerting to Telegram or SMS.
+7. Optional: set `SITE_ROUTER` in `.env` (a port the plant router itself answers on), so the app can tell
+   "plant internet down" from "NVR off".
 
 ## Everyday
 

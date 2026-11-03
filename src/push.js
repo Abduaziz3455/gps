@@ -9,7 +9,7 @@ const webpush = require('web-push');
 const bus = require('./bus');
 const T = require('./time');
 
-const DEFAULT_PREFS = { gateIn: true, gateOut: true, onlyFleet: false, alerts: true, quietFrom: '', quietTo: '' };
+const DEFAULT_PREFS = { gateIn: true, gateOut: true, onlyFleet: false, alerts: true, system: true, quietFrom: '', quietTo: '' };
 
 class Push {
   constructor({ h, config, log = console, sender = null }) {
@@ -85,7 +85,7 @@ class Push {
     const now = Date.now();
     await Promise.all(subs.map(async (s) => {
       const prefs = { ...DEFAULT_PREFS, ...JSON.parse(s.prefs) };
-      if (!want(prefs, s.role, s) || (payload.kind !== 'test' && inQuiet(prefs, now))) return;
+      if (!want(prefs, s.role, s) || (payload.kind !== 'test' && payload.kind !== 'system' && inQuiet(prefs, now))) return;
       try {
         await this.send({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, { TTL: 3600, urgency: payload.urgency || 'normal' });
         this.sent++;
@@ -126,15 +126,18 @@ class Push {
     });
     bus.on('alert', (a) => {
       if (a.silent) return;
-      const payload = { title: `${a.severity === 'critical' ? '🚨' : '⚠️'} ${a.title}`, body: a.body || '', tag: `alert-${a.id}`, url: `/#/ogohlantirish?id=${a.id}`, kind: 'alert', urgency: a.severity === 'critical' ? 'high' : 'normal' };
-      this.broadcast(payload, (p, role) => p.alerts && (a.type !== 'system' || role === 'owner')).catch(() => {});
+      const payload = { title: a.severity === 'info' ? a.title : `${a.severity === 'critical' ? '🚨' : '⚠️'} ${a.title}`, body: a.body || '', tag: `alert-${a.id}`, url: `/#/ogohlantirish?id=${a.id}`, kind: 'alert', urgency: a.severity === 'critical' ? 'high' : 'normal' };
+      // System problems (cameras, internet, GPS) go to everyone who keeps "system" on; quiet hours don't apply to them.
+      const sys = a.type === 'system';
+      if (sys) Object.assign(payload, { kind: 'system', tag: `system-${a.data?.problem || a.id}` }); // recovery replaces the outage notice
+      this.broadcast(payload, (p) => (sys ? p.system : p.alerts)).catch(() => {});
     });
   }
 }
 
 function cleanPrefs(p = {}) {
   const out = {};
-  for (const k of ['gateIn', 'gateOut', 'onlyFleet', 'alerts']) if (k in p) out[k] = !!p[k];
+  for (const k of ['gateIn', 'gateOut', 'onlyFleet', 'alerts', 'system']) if (k in p) out[k] = !!p[k];
   for (const k of ['quietFrom', 'quietTo']) if (k in p) out[k] = /^\d{2}:\d{2}$/.test(p[k]) ? p[k] : '';
   return out;
 }

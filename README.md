@@ -17,6 +17,9 @@ Design and reasoning: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Deployment: 
 | **Hisobot** | everyone | Per-vehicle table for any range, CSV, print |
 | **Sozlamalar** | everyone / owner | Push notifications for this device, password; owner: users, vehicles (type, real plate), system health |
 
+System health: the app checks every minute whether our server's internet, GoGPS, the plant's internet, the NVR
+and each camera work, and says in plain words which one broke (and when it is back, with the period).
+
 Push notifications: entry/exit (per device: entries, exits, fleet only, quiet hours) and alerts. On iPhone the
 site must be added to the Home Screen first (iOS 16.4+).
 
