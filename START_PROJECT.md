@@ -1,6 +1,6 @@
 # Deploy TBB Dispatcher v2
 
-Server: Ubuntu with nginx and Docker (tbbdispatcher.uz, 38.242.242.133). Takes over from v1 in the same folder.
+Server: Ubuntu with nginx and Docker (tbb-gps.uz, 38.242.242.133). Takes over from v1 in the same folder.
 
 ## 1. Before you start
 
@@ -25,7 +25,7 @@ cp .env.example .env && nano .env
 ```
 
 Fill in `GPS_LOGIN`, `GPS_PASSWORD`, `NVR_HOST`, `NVR_PASSWORD`, `OWNER_USERNAME`, `OWNER_PASSWORD`
-(the first owner account; 8+ characters), `PUBLIC_ORIGIN=https://tbbdispatcher.uz`.
+(the first owner account; 8+ characters), `PUBLIC_ORIGIN=https://tbb-gps.uz`.
 
 ```bash
 mkdir -p data && sudo chown -R 1000:1000 data && chmod 600 .env
@@ -51,15 +51,21 @@ curl -s http://127.0.0.1:8090/health
 
 ## 5. nginx
 
-The new config adds the live-stream location (no buffering). Certificates stay where certbot put them.
+The new config adds the live-stream location (no buffering).
+
+First point the DNS of `tbb-gps.uz` to this server, then get its certificate (the config won't load without it):
 
 ```bash
-cp nginx.conf /etc/nginx/sites-available/tbbdispatcher.uz && nginx -t && systemctl reload nginx
+certbot certonly --nginx -d tbb-gps.uz
+```
+
+```bash
+cp nginx.conf /etc/nginx/sites-available/tbb-gps.uz && ln -sf /etc/nginx/sites-available/tbb-gps.uz /etc/nginx/sites-enabled/tbb-gps.uz && nginx -t && systemctl reload nginx
 ```
 
 ## 6. After the switch
 
-1. Log in at https://tbbdispatcher.uz as the owner. Settings → Users: create the dispatchers' accounts.
+1. Log in at https://tbb-gps.uz as the owner. Settings → Users: create the dispatchers' accounts.
 2. Settings → Vehicles: set each truck's type and, where GoGPS names it differently, its real plate
    (suggestions appear once the cameras have seen it).
 3. **Change the GoGPS password** (v1 published it in the page source), then update `GPS_PASSWORD` here and in the
@@ -68,7 +74,7 @@ cp nginx.conf /etc/nginx/sites-available/tbbdispatcher.uz && nginx -t && systemc
    Notifications → Turn on.
 5. Remove `OWNER_PASSWORD` from `.env`.
 6. Optional, recommended: an outside uptime check, for the one case the server can't report itself (it is
-   completely down). Any free monitor (UptimeRobot, Better Stack…) on `https://tbbdispatcher.uz/health`
+   completely down). Any free monitor (UptimeRobot, Better Stack…) on `https://tbb-gps.uz/health`
    every 5 minutes, alerting to Telegram or SMS.
 7. Optional: set `SITE_ROUTER` in `.env` (a port the plant router itself answers on), so the app can tell
    "plant internet down" from "NVR off".

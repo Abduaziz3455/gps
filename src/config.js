@@ -33,7 +33,7 @@ const config = {
   env: env.NODE_ENV || 'production',
   port: num(env.PORT, 8090),
   host: env.HOST || '0.0.0.0',
-  publicOrigin: (env.PUBLIC_ORIGIN || '').replace(/\/$/, ''), // e.g. https://tbbdispatcher.uz (Origin check, push links)
+  publicOrigin: (env.PUBLIC_ORIGIN || '').replace(/\/$/, ''), // e.g. https://tbb-gps.uz (Origin check, push links)
   dataDir: path.resolve(ROOT, env.DATA_DIR || 'data'),
   mock: bool(env.MOCK, false), // fake GPS + NVR for development and screenshots
 
@@ -76,7 +76,7 @@ const config = {
   },
 
   push: {
-    subject: env.VAPID_SUBJECT || 'mailto:admin@tbbdispatcher.uz',
+    subject: env.VAPID_SUBJECT || 'mailto:admin@tbb-gps.uz',
   },
 
   rules: {

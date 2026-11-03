@@ -23,7 +23,7 @@ The v1 file is kept in git history (commit `7724957` matches what runs on the si
 ## 2. System overview
 
 ```
- plant                                    tbbdispatcher.uz (38.242.242.133)                       people
+ plant                                    tbb-gps.uz (38.242.242.133)                          people
  ┌──────────────────┐  ISAPI (digest)    ┌───────────────────────────────────────────────┐
  │ Hikvision NVR    │◄───────────────────│ camera pipeline                               │
  │  ANPR-1  entry   │  event stream,     │  NVR events + 60 s poll → plate rules →       │
@@ -206,7 +206,7 @@ device is offline ("Qurilmangizda internet yo'q") or our server can't be reached
 aloqa yo'q"). System messages go to everyone and ignore quiet hours (per-device switch "Tizim holati").
 
 When this server is completely down nobody inside it can send anything: an outside uptime check on
-`https://tbbdispatcher.uz/health` (START_PROJECT.md) covers that.
+`https://tbb-gps.uz/health` (START_PROJECT.md) covers that.
 
 ## 8. Security
 
