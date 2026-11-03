@@ -419,8 +419,8 @@
     .legend-swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 
     .vehicle-marker-wrap {
-      width: 72px;
-      height: 72px;
+      width: 78px;
+      height: 78px;
       position: relative;
     }
     .vehicle-marker-rotor {
@@ -479,6 +479,20 @@
       color: #1565C0;
       animation: movingGlow 1.15s ease-in-out infinite;
     }
+    .vehicle-marker-wrap.status-moving .vehicle-ring-pulse {
+      position: absolute;
+      inset: -6px;
+      border-radius: 50%;
+      border: 3px solid #1565C0;
+      animation: ringPulse 1.8s ease-out infinite;
+      pointer-events: none;
+    }
+    .vehicle-marker-wrap.status-moving .vehicle-ring-pulse:nth-child(2) {
+      animation-delay: .6s;
+    }
+    .vehicle-marker-wrap.status-moving .vehicle-ring-pulse:nth-child(3) {
+      animation-delay: 1.2s;
+    }
     .vehicle-marker-wrap.status-idle { color: #FFD600; }
     .vehicle-marker-wrap.status-stopped { color: #FF1744; }
     .vehicle-marker-wrap.status-offline { color: #E53935; opacity: 1; }
@@ -486,6 +500,10 @@
     @keyframes movingGlow {
       0%, 100% { filter: drop-shadow(0 0 6px rgba(21,101,192,.45)) saturate(1.2); }
       50% { filter: drop-shadow(0 0 14px rgba(21,101,192,.85)) saturate(1.35); }
+    }
+    @keyframes ringPulse {
+      0% { transform: scale(1); opacity: .7; }
+      100% { transform: scale(2); opacity: 0; }
     }
     .leaflet-marker-icon.marker-selected .vehicle-speed-chip {
       opacity: 1;
@@ -717,6 +735,20 @@
     // Do NOT hardcode real credentials here — set GPS_LOGIN and GPS_PASSWORD in .env
     const AUTO_LOGIN_CREDENTIALS = { login: '', password: '' };
 
+    const DUMP_TRUCK_PLATES = new Set(['450', '304', '805', '274', '158', '159']);
+    const EXCAVATOR_PLATES = new Set(['117']);
+
+    function vehicleType(vehicleId) {
+      if (!vehicleId || !app.vehicles) return '';
+      const v = app.vehicles.find(v => String(v.vehicleId) === String(vehicleId));
+      const name = v?.vehicleNumber || v?.name || '';
+      const digits = name.replace(/[^0-9]/g, '');
+      const num = digits.length >= 3 ? digits.slice(-6) : '';
+      if (DUMP_TRUCK_PLATES.has(num)) return 'dump';
+      if (EXCAVATOR_PLATES.has(num)) return 'excavator';
+      return '';
+    }
+
     const STATUS_COLORS = {
       moving: '#00C853',
       stopped: '#FF1744',
@@ -859,9 +891,7 @@
           deviceTypeId: null, parentId: null, unitId: null, customFields: null
         });
       }
-      // NOTE: this endpoint expects raw JSON array of int IDs, not object wrapper.
-      // Correct body example: [21673,21314]
-      getLastData(vehicleIds) { return this.request('/api/v3/vehicles/getlastdata', 'POST', vehicleIds); }
+      getLastData(vehicleIds) { return this.request('/api/v3/vehicles/getlastdata', 'POST', { VehiclesIds: vehicleIds }); }
       getMoveStop(params, options=null) { return this.request('/api/v3/vehicles/moveStop', 'POST', params, options || {}); }
       getFuelConsumption(params, options=null) { return this.request('/api/v3/vehicles/fuelConsumption', 'POST', params, options || {}); }
       getFuelInOut(params, options=null) { return this.request('/api/v3/vehicles/fuelInOut', 'POST', params, options || {}); }
@@ -1385,59 +1415,90 @@
       return Number(app.activityById?.[vehicleId] || 0);
     }
 
-    function markerIconByStatus(statusKey) {
-      if (app.markerIcons.has(statusKey)) return app.markerIcons.get(statusKey);
-      const icon = L.divIcon({
-        className: 'vehicle-marker-icon',
-        html: `
-          <div class="vehicle-marker-wrap status-${statusKey}">
-            <span class="vehicle-plate-chip">---</span>
-            <div class="vehicle-marker-rotor">
+    function markerIconByStatus(statusKey, vehicleId) {
+      const vType = vehicleId ? vehicleType(vehicleId) : '';
+      const cacheKey = vType ? statusKey + '-' + vType : statusKey;
+      if (app.markerIcons.has(cacheKey)) return app.markerIcons.get(cacheKey);
+
+      const vehicleSvg = vType === 'dump' ? `
               <svg class="vehicle-mixer-svg" viewBox="0 0 96 96" aria-hidden="true">
-                <!-- shadow -->
                 <ellipse cx="48" cy="82" rx="26" ry="6" fill="rgba(0,0,0,.22)"/>
-
-                <!-- chassis -->
                 <rect x="20" y="58" width="56" height="8" rx="3" fill="currentColor"/>
-
-                <!-- rear frame + chute -->
+                <path d="M18 47h8l4 14H18z" fill="#aeb8c8"/>
+                <path d="M64 36h10c4 0 7 3 7 7v15H56V43c0-4 4-7 8-7z" fill="currentColor"/>
+                <rect x="64" y="40" width="14" height="9" rx="1.6" fill="#d8edf9"/>
+                <rect x="60" y="58" width="18" height="5" rx="2" fill="currentColor"/>
+                <g transform="rotate(-8 44 43)">
+                  <path d="M20 42h48v2H20z" fill="#8b99b0"/>
+                  <path d="M18 44h52l-10 18H26z" fill="#dfe4ec" stroke="#97a5bb" stroke-width="2"/>
+                  <path d="M25 54l-3 8h38l4-8z" fill="#b6c0cf"/>
+                </g>
+                <path d="M25 46l-6 8h46l6-8z" fill="#95a3bb" opacity=".6"/>
+                <circle cx="33" cy="70" r="7.2" fill="#fff"/>
+                <circle cx="33" cy="70" r="3.1" fill="#1a1f2e"/>
+                <circle cx="62" cy="70" r="7.2" fill="#fff"/>
+                <circle cx="62" cy="70" r="3.1" fill="#1a1f2e"/>
+              </svg>` : vType === 'excavator' ? `
+              <svg class="vehicle-mixer-svg" viewBox="0 0 96 96" aria-hidden="true">
+                <ellipse cx="48" cy="82" rx="26" ry="6" fill="rgba(0,0,0,.22)"/>
+                <rect x="16" y="58" width="56" height="8" rx="3" fill="currentColor"/>
+                <path d="M72 38h8c4 0 7 3 7 7v13H68V45c0-4 2-7 4-7z" fill="currentColor"/>
+                <rect x="72" y="42" width="14" height="8" rx="1.6" fill="#d8edf9"/>
+                <rect x="70" y="58" width="16" height="5" rx="2" fill="currentColor"/>
+                <rect x="36" y="36" width="24" height="24" rx="4" fill="#dfe4ec" stroke="#97a5bb" stroke-width="2"/>
+                <rect x="38" y="38" width="20" height="12" rx="2" fill="#b6c0cf"/>
+                <path d="M42 22l-6 14h-4l6-14z" fill="#8b99b0"/>
+                <path d="M38 22l6 14h18l4-8-8-6z" fill="#dfe4ec" stroke="#97a5bb" stroke-width="2"/>
+                <path d="M62 30l-6 6h-4l4-6z" fill="#b6c0cf"/>
+                <rect x="10" y="32" width="14" height="7" rx="2" fill="#bfc8d6"/>
+                <path d="M10 34l-4 18h10l2-10z" fill="#95a3bb"/>
+                <path d="M16 54l-2 10h14l2-10z" fill="#aeb8c8"/>
+                <circle cx="28" cy="68" r="7.2" fill="#fff"/>
+                <circle cx="28" cy="68" r="3.1" fill="#1a1f2e"/>
+                <circle cx="58" cy="68" r="7.2" fill="#fff"/>
+                <circle cx="58" cy="68" r="3.1" fill="#1a1f2e"/>
+                <circle cx="16" cy="68" r="5" fill="#fff"/>
+                <circle cx="16" cy="68" r="2" fill="#1a1f2e"/>
+              </svg>` : `
+              <svg class="vehicle-mixer-svg" viewBox="0 0 96 96" aria-hidden="true">
+                <ellipse cx="48" cy="82" rx="26" ry="6" fill="rgba(0,0,0,.22)"/>
+                <rect x="20" y="58" width="56" height="8" rx="3" fill="currentColor"/>
                 <rect x="18" y="49" width="10" height="12" rx="2" fill="currentColor"/>
                 <path d="M14 62h16l-5 8H19z" fill="#aeb8c8"/>
-
-                <!-- cabin -->
                 <path d="M62 38h10c4 0 7 3 7 7v13H58V45c0-4 2-7 4-7z" fill="currentColor"/>
                 <rect x="62" y="42" width="13" height="8" rx="1.6" fill="#d8edf9"/>
                 <rect x="60" y="58" width="20" height="5" rx="2" fill="currentColor"/>
-
-                <!-- drum cradle -->
                 <rect x="31" y="49" width="7" height="11" rx="2" fill="#95a3bb"/>
                 <rect x="53" y="49" width="7" height="11" rx="2" fill="#95a3bb"/>
-
-                <!-- mixer drum -->
                 <g transform="rotate(-16 46 45)">
                   <ellipse cx="46" cy="45" rx="18" ry="14" fill="#dfe4ec" stroke="#97a5bb" stroke-width="2"/>
                   <path d="M33 40c4-2 8-3 12-3 5 0 9 1 13 3" stroke="#8b99b0" stroke-width="2" fill="none"/>
                   <path d="M30 45h32" stroke="#8b99b0" stroke-width="2"/>
                   <path d="M33 50c4 2 8 3 12 3 5 0 9-1 13-3" stroke="#8b99b0" stroke-width="2" fill="none"/>
                 </g>
-
-                <!-- rear funnel connection -->
                 <path d="M27 43h9l3 6h-9z" fill="#b6c0cf"/>
-
-                <!-- wheels -->
                 <circle cx="33" cy="70" r="7.2" fill="#fff"/>
                 <circle cx="33" cy="70" r="3.1" fill="#1a1f2e"/>
                 <circle cx="62" cy="70" r="7.2" fill="#fff"/>
                 <circle cx="62" cy="70" r="3.1" fill="#1a1f2e"/>
-              </svg>
+              </svg>`;
+
+      const icon = L.divIcon({
+        className: 'vehicle-marker-icon',
+        html: `
+          <div class="vehicle-marker-wrap status-${statusKey}${vType ? ' vehicle-' + vType : ''}">
+            ${statusKey === 'moving' ? '<div class="vehicle-ring-pulse"></div><div class="vehicle-ring-pulse"></div><div class="vehicle-ring-pulse"></div>' : ''}
+            <span class="vehicle-plate-chip">---</span>
+            <div class="vehicle-marker-rotor">
+              ${vehicleSvg}
             </div>
             <span class="vehicle-speed-chip">0 km/soat</span>
           </div>
         `,
-        iconSize: [72, 72],
-        iconAnchor: [36, 36]
+        iconSize: [78, 78],
+        iconAnchor: [39, 39]
       });
-      app.markerIcons.set(statusKey, icon);
+      app.markerIcons.set(cacheKey, icon);
       return icon;
     }
 
@@ -2578,7 +2639,7 @@
         if (!marker) {
           marker = L.marker([d.latitude, d.longitude], {
             pane: 'vehiclesPane',
-            icon: markerIconByStatus(st.key),
+            icon: markerIconByStatus(st.key, d.vehicleId),
             keyboard: false
           }).addTo(app.map);
           marker._statusKey = st.key;
@@ -2591,9 +2652,10 @@
         } else {
           const smoothDuration = computeMarkerAnimationDuration(marker, d);
           animateMarkerTo(marker, d.latitude, d.longitude, smoothDuration);
-          if (marker._statusKey !== st.key) {
-            marker.setIcon(markerIconByStatus(st.key));
+          if (marker._statusKey !== st.key || marker._lastVehicleId !== d.vehicleId) {
+            marker.setIcon(markerIconByStatus(st.key, d.vehicleId));
             marker._statusKey = st.key;
+            marker._lastVehicleId = d.vehicleId;
           }
           marker._statusKey = st.key;
           if (typeof marker.setTooltipContent === 'function') {
@@ -2681,7 +2743,7 @@
 
             for (const payload of variants) {
               try {
-                const alt = await app.api.request('/api/v3/vehicles/getlastdata', 'POST', payload);
+                const alt = await app.api.request('/api/v3/vehicles/getlastdata', 'POST', { VehiclesIds: payload });
                 rows = arr(alt);
                 if (rows.length && rows.some(rowHasCoordinates)) break;
               } catch (_) {}
