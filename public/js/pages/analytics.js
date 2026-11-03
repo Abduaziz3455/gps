@@ -1,214 +1,146 @@
-// Tahlil (owner): KPIs vs the previous period, daily trends, gate load heatmap, turnaround distribution,
-// per-vehicle ranking and outside vehicles. The chosen range lives in the URL (#/tahlil?from=&to=).
+// Tahlil (owner): the few numbers an owner checks at a glance. Four headline numbers against the previous
+// period, one daily chart, a short "needs attention" list, and vehicles ranked by trips. The full per-vehicle
+// table lives in Hisobot. The chosen period is kept in the URL (#/tahlil?from=&to=).
 import { get, qs } from '../api.js';
-import { $, html, setHtml, icon, esc, num, dur, when, dayLabel, shortDay, WEEKDAYS, toastError } from '../ui.js';
-import { barChart, heatmap, responsive } from '../charts.js';
-import { rangeFromQuery, rangeControl, replaceQuery, rangeText, vehicleTable } from './reports.js';
+import { $, html, setHtml, icon, typeIcon, esc, num, dayLabel, shortDay, toastError } from '../ui.js';
+import { barChart, responsive } from '../charts.js';
+import { presetRange, rangeFromQuery, replaceQuery, rangeText, PRESET_LABELS } from './reports.js';
 
-// good: 1 = higher is better, -1 = lower is better (costs, waiting), 0 = neutral. pp: show change in percentage points.
+const PRESETS = ['today', 'd7', 'd30', 'month'];
+
+// good: 1 = more is better, -1 = less is better. pp: change in percentage points (for shares).
 const KPIS = [
-  { k: 'trips', label: 'Reyslar', unit: 'ta', good: 1 },
+  { k: 'trips', label: 'Reyslar', good: 1 },
   { k: 'km', label: 'Masofa', unit: 'km', good: 1 },
-  { k: 'engineHours', label: 'Motosoat', unit: 'soat', good: 1 },
-  { k: 'utilization', label: 'Foydalanish', unit: '%', pp: true, good: 1, sub: (c) => `${num(c.activeVehicleDays)} faol transport-kun · ${num(c.vehiclesTotal)} ta transport` },
-  { k: 'turnaroundMin', label: 'Aylanish vaqti', unit: 'daq', good: -1, sub: () => "Chiqish → keyingi kirish, o'rtacha" },
-  { k: 'yardMin', label: "Hovlida o'rtacha", unit: 'daq', good: -1, sub: () => 'Kirish → chiqish (yuklash navbati)' },
-  { k: 'idleShare', label: 'Salt ishlash', unit: '%', pp: true, good: -1, sub: () => 'Motosoatning turib ishlagan qismi' },
-  { k: 'fuelUsed', label: "Yoqilg'i", unit: 'L', good: -1, sub: (c, p) => `${num(c.fuelPer100, 1)} L/100 km · oldin ${num(p.fuelPer100, 1)}` },
-  { k: 'drains', label: "To'kish", unit: 'ta', good: -1, sub: (c) => `Jami ${num(c.drainL, 0)} L to'kilgan` },
-  { k: 'outsideVisits', label: 'Begona mashinalar', unit: 'ta', good: 0, sub: (c) => `${num(c.outsidePlates)} ta turli raqam` },
+  { k: 'fuelUsed', label: "Yoqilg'i", unit: 'L', good: -1, sub: (c) => (c.fuelPer100 != null ? `${num(c.fuelPer100, 1)} L/100 km` : '') },
+  { k: 'utilization', label: 'Foydalanish', unit: '%', pp: true, good: 1 },
 ];
 
-const TURN_LABELS = [...Array.from({ length: 12 }, (_, i) => `${i * 30}–${i * 30 + 30}`), '6 soat+'];
-
-const weekday = (day) => WEEKDAYS[(new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7];
-
-function deltaHtml(cur, prev, { pp, good }) {
-  if (cur == null || prev == null) return html`<span class="delta flat">—</span>`;
-  let diff, text;
-  if (pp) {
-    diff = cur - prev;
-    text = `${num(Math.abs(diff))} p.p.`;
-  } else {
-    if (prev === 0) return cur === 0 ? html`<span class="delta flat">0%</span>` : html`<span class="delta flat" title="Oldingi davrda 0">yangi</span>`;
-    diff = ((cur - prev) / Math.abs(prev)) * 100;
-    if (Math.abs(diff) < 0.5) diff = 0;
-    text = `${num(Math.abs(diff), Math.abs(diff) < 10 && diff !== 0 ? 1 : 0)}%`;
-  }
-  const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '±';
-  const cls = diff === 0 || !good ? 'flat' : (diff > 0) === (good > 0) ? 'up' : 'down';
-  const verdict = cls === 'up' ? 'yaxshilandi' : cls === 'down' ? 'yomonlashdi' : "o'zgarish";
-  return html`<span class="delta ${cls}" title="Oldingi davrga nisbatan: ${verdict}">${arrow} ${text}</span>`;
+function delta(cur, prev, { pp, good }) {
+  if (cur == null || prev == null) return '';
+  let d;
+  if (pp) d = cur - prev;
+  else if (prev === 0) return '';
+  else d = ((cur - prev) / Math.abs(prev)) * 100;
+  if (Math.abs(d) < 0.5) return html`<span class="delta flat">o'zgarmadi</span>`;
+  const cls = (d > 0) === (good > 0) ? 'up' : 'down';
+  return html`<span class="delta ${cls}">${d > 0 ? '▲' : '▼'} ${num(Math.abs(d))}${pp ? ' p.p.' : '%'}</span>`;
 }
 
-function tileHtml(def, cur, prev) {
-  const v = cur[def.k], p = prev[def.k];
-  const unit = def.unit === 'ta' ? '' : def.unit;
-  const val = (x) => (x == null ? '—' : `${num(x)}${unit && x != null ? (unit === '%' ? '%' : ` ${unit}`) : ''}`);
+function tile(def, cur, prev) {
+  const v = cur[def.k];
   return html`<div class="tile">
     <div class="tile-label">${def.label}</div>
-    <div class="tile-value">${v == null ? '—' : num(v)}${v != null && unit ? html`<small>${unit}</small>` : ''}</div>
-    <div class="tile-sub">${deltaHtml(v, p, def)} <span>· oldin: ${val(p)}</span></div>
-    ${def.sub ? html`<div class="tile-sub" title="${def.sub(cur, prev)}">${def.sub(cur, prev)}</div>` : ''}
+    <div class="tile-value">${v == null ? '—' : num(v)}${v != null && def.unit ? html`<small>${def.unit}</small>` : ''}</div>
+    <div class="tile-sub">${delta(v, prev[def.k], def)} ${def.sub?.(cur) || ''}</div>
   </div>`;
 }
 
-const chartCard = (id, title, extra = '') => html`<section class="card">
-  <div class="card-head"><h3>${title}</h3><span class="spacer"></span>${extra}</div>
-  <div class="card-body"><div id="${id}"></div></div></section>`;
+/** Only what needs a look; empty means all is well. */
+function attention(c, vehicles) {
+  const items = [];
+  if (c.drains) items.push({ sev: 'bad', text: `Yoqilg'i to'kildi: ${c.drains} marta, jami ${num(c.drainL)} L`, href: '#/ogohlantirish?state=all&type=fuel_drain' });
+  if (c.speeding) items.push({ sev: 'warn', text: `Tezlik oshirildi: ${c.speeding} marta`, href: '#/ogohlantirish?state=all&type=speeding' });
+  const over = vehicles.filter((v) => v.fuelNorm && v.fuelPer100 > v.fuelNorm * 1.15);
+  if (over.length) items.push({ sev: 'warn', text: `Yoqilg'i normadan ko'p: ${over.map((v) => v.label).join(', ')}` });
+  const idle = vehicles.filter((v) => !v.trips && v.km < 5);
+  if (idle.length) items.push({ sev: '', text: `Ishlamagan: ${idle.length} ta transport (${idle.slice(0, 4).map((v) => v.label).join(', ')}${idle.length > 4 ? '…' : ''})` });
+  if (c.outsideVisits) items.push({ sev: '', text: `Begona mashinalar ${c.outsideVisits} marta kirdi (${c.outsidePlates} ta raqam)`, href: `#/darvoza` });
+  if (!items.length) return html`<div class="empty">${icon('check')} Diqqat talab qiladigan narsa yo'q</div>`;
+  return html`<ul class="att-list">${items.map((i) => html`<li class="att ${i.sev}">
+    ${icon(i.sev === 'bad' || i.sev === 'warn' ? 'alert' : 'info')}<span>${i.text}</span>${i.href ? html`<a href="${i.href}">Ko'rish</a>` : ''}</li>`)}</ul>`;
+}
 
 export default {
   async render(main, { query }) {
     let range = rangeFromQuery(query, 'd7');
-    let direction = '';
-    let seq = 0, hseq = 0;
-    let alive = true;
-    const disposers = new Map();
+    let metric = 'trips';
+    let series = [];
+    let seq = 0, alive = true, dispose = null;
 
     setHtml(main, html`<div class="page">
       <div class="page-head">
-        <div>
-          <h2>Tahlil</h2>
-          <div class="small muted" id="anRange"></div>
-        </div>
+        <div><h2>Tahlil</h2><div class="small muted" id="anRange"></div></div>
         <span class="spacer"></span>
-        <div id="anRangeCtl"></div>
+        <div class="seg" id="anPreset" role="group" aria-label="Davr">${PRESETS.map((k) => html`<button type="button" data-p="${k}" aria-pressed="false">${PRESET_LABELS[k]}</button>`)}</div>
       </div>
-      <div id="anBody" class="an-body">
-        <div class="tiles" id="anKpis">${KPIS.map((d) => html`<div class="tile"><div class="tile-label">${d.label}</div><div class="tile-value muted">…</div><div class="tile-sub">&nbsp;</div></div>`)}</div>
-        <div class="grid grid-2">
-          ${chartCard('chTrips', 'Kunlik reyslar')}
-          ${chartCard('chKm', 'Kunlik masofa, km')}
-          ${chartCard('chActive', 'Faol transportlar')}
-          ${chartCard('chTurn', 'Aylanish vaqti taqsimoti', html`<span class="small muted">daqiqa, reyslar soni</span>`)}
-          <section class="card span-all">
-            <div class="card-head"><h3>Darvoza yuklamasi: hafta kuni × soat</h3><span class="spacer"></span>
-              <div class="seg" id="hmDir" role="group" aria-label="Yo'nalish">
-                <button type="button" data-d="" aria-pressed="true">Hammasi</button>
-                <button type="button" data-d="in" aria-pressed="false">Kirish</button>
-                <button type="button" data-d="out" aria-pressed="false">Chiqish</button>
-              </div>
-            </div>
-            <div class="card-body"><div id="chHeat"></div></div>
-          </section>
-        </div>
+      <div class="tiles an-tiles" id="anKpis"></div>
+      <div class="grid an-grid">
         <section class="card">
-          <div class="card-head"><h3>Transportlar reytingi</h3><span class="small muted">qatorni bosing — transport sahifasi</span><span class="spacer"></span>
-            <button class="btn btn-sm" id="anCsv" type="button">${icon('download')}<span>CSV</span></button></div>
-          <div id="anTable"><div class="empty">Yuklanmoqda…</div></div>
+          <div class="card-head"><h3 id="chTitle">Kunlik reyslar</h3><span class="spacer"></span>
+            <div class="seg" id="anMetric" role="group" aria-label="Ko'rsatkich">
+              <button type="button" data-m="trips" aria-pressed="true">Reyslar</button><button type="button" data-m="km" aria-pressed="false">Km</button>
+            </div></div>
+          <div class="card-body"><div id="anChart"></div></div>
         </section>
         <section class="card">
-          <div class="card-head"><h3>Begona mashinalar</h3><span class="small muted">GPS ro'yxatida yo'q, kamera o'qigan raqamlar</span></div>
-          <div id="anOut"><div class="empty">Yuklanmoqda…</div></div>
+          <div class="card-head"><h3>Diqqat</h3></div>
+          <div id="anAtt"></div>
         </section>
       </div>
+      <section class="card">
+        <div class="card-head"><h3>Transportlar</h3><span class="small muted">reyslar bo'yicha</span><span class="spacer"></span>
+          <a class="btn btn-sm" id="anFull" href="#/hisobot">To'liq jadval</a></div>
+        <div id="anTable"></div>
+      </section>
     </div>`);
 
-    const body = $('#anBody', main);
-    const table = vehicleTable($('#anTable', main));
-
-    const draw = (key, el, fn) => {
-      disposers.get(key)?.();
-      disposers.delete(key);
-      if (!fn) return;
-      disposers.set(key, responsive(el, fn));
-    };
-    const empty = (key, el, text = "Bu oraliqda ma'lumot yo'q") => { draw(key, el, null); setHtml(el, html`<div class="empty">${text}</div>`); };
-
-    const bars = (key, series, field, unit, digits = 0) => {
-      const el = $(`#${key}`, main);
-      if (!series.length || series.every((s) => !s[field])) return empty(key, el);
-      const data = series.map((s) => ({
-        label: shortDay(s.day), value: s[field] || 0,
-        tip: `<b>${esc(dayLabel(s.day, true))}, ${esc(weekday(s.day))}</b><br>${esc(num(s[field], digits))} ${esc(unit)}`,
-      }));
-      return draw(key, el, () => barChart(el, data, { height: 200, unit, valueLabels: data.length <= 14 }));
+    const drawChart = () => {
+      const el = $('#anChart', main);
+      dispose?.();
+      $('#chTitle', main).textContent = metric === 'trips' ? 'Kunlik reyslar' : 'Kunlik masofa, km';
+      if (!series.some((s) => s[metric])) { dispose = null; return setHtml(el, html`<div class="empty">Bu davrda ma'lumot yo'q</div>`); }
+      const unit = metric === 'trips' ? 'reys' : 'km';
+      const data = series.map((s) => ({ label: shortDay(s.day), value: s[metric] || 0, tip: `<b>${esc(dayLabel(s.day))}</b>: ${esc(num(s[metric]))} ${unit}` }));
+      dispose = responsive(el, () => barChart(el, data, { height: 220, unit, valueLabels: data.length <= 14 }));
     };
 
-    const drawHeat = (grid) => {
-      const el = $('#chHeat', main);
-      if (!grid.flat().some(Boolean)) return empty('chHeat', el, "Bu oraliqda darvoza hodisalari yo'q");
-      return draw('chHeat', el, () => heatmap(el, grid, { unit: "o'tish" }));
-    };
-
-    const drawTurn = (buckets) => {
-      const el = $('#chTurn', main);
-      if (!buckets.some(Boolean)) return empty('chTurn', el, "Aylanish ma'lumoti yo'q");
-      const total = buckets.reduce((a, b) => a + b, 0);
-      const data = buckets.map((v, i) => ({
-        label: TURN_LABELS[i], value: v,
-        tip: `<b>${esc(i === 12 ? '6 soatdan ortiq' : `${TURN_LABELS[i]} daqiqa`)}</b><br>${v} reys · ${Math.round((v / total) * 100)}%`,
-      }));
-      return draw('chTurn', el, () => barChart(el, data, { height: 200, unit: 'reys', valueLabels: true }));
-    };
-
-    const drawOutsiders = (list) => {
-      const el = $('#anOut', main);
-      if (!list.length) return setHtml(el, html`<div class="empty">Bu oraliqda begona mashinalar kelmagan</div>`);
-      return setHtml(el, html`<div class="table-wrap" style="max-height:420px"><table class="table">
-        <thead><tr><th scope="col">Raqam</th><th class="num" scope="col">Kelishlar</th><th class="num" scope="col" title="Hovlida o'rtacha turish vaqti">O'rt. turish</th><th class="num" scope="col">Oxirgi marta</th></tr></thead>
-        <tbody>${list.map((o) => html`<tr><td><span class="plate-chip">${o.plate}</span></td><td class="num">${num(o.visits)}</td>
-          <td class="num nowrap">${o.stayMin == null ? '—' : dur(o.stayMin * 60)}</td><td class="num nowrap">${when(o.lastT)}</td></tr>`)}</tbody>
-      </table></div>`);
-    };
-
-    const loadHeat = async () => {
-      const my = ++hseq;
-      try {
-        const grid = await get(`/api/analytics/heatmap?${qs({ ...range, direction })}`);
-        if (alive && my === hseq) drawHeat(grid);
-      } catch (e) { if (alive) toastError(e); }
+    const drawTable = (vehicles) => {
+      const rows = vehicles.filter((v) => v.trips || v.km >= 1);
+      const max = Math.max(1, ...rows.map((v) => v.trips));
+      setHtml($('#anTable', main), rows.length ? html`<div class="table-wrap"><table class="table">
+        <thead><tr><th>Transport</th><th class="num">Reys</th><th class="an-barcol" aria-hidden="true"></th><th class="num">Km</th><th class="num">Ishlagan kun</th></tr></thead>
+        <tbody>${rows.map((v) => html`<tr class="clickable" data-id="${v.id}">
+          <td class="nowrap">${typeIcon(v.type)} <b>${v.label}</b></td><td class="num">${v.trips}</td>
+          <td class="an-barcol"><span class="an-bar" style="width:${Math.round((v.trips / max) * 100)}%"></span></td>
+          <td class="num">${num(v.km)}</td><td class="num">${v.activeDays}/${v.days}</td></tr>`)}</tbody></table></div>`
+        : html`<div class="empty">Bu davrda ishlagan transport yo'q</div>`);
     };
 
     const load = async () => {
       const my = ++seq;
-      ++hseq;
-      body.classList.add('is-loading');
       const q = qs(range);
+      for (const b of $('#anPreset', main).children) { const p = presetRange(b.dataset.p); b.setAttribute('aria-pressed', String(p.from === range.from && p.to === range.to)); }
+      $('#anFull', main).href = `#/hisobot?${q}`;
       try {
-        const [ov, series, vehicles, grid, turn, outsiders] = await Promise.all([
-          get(`/api/analytics/overview?${q}`), get(`/api/analytics/series?${q}`), get(`/api/analytics/vehicles?${q}`),
-          get(`/api/analytics/heatmap?${qs({ ...range, direction })}`), get(`/api/analytics/turnaround?${q}`), get(`/api/analytics/outsiders?${q}`),
-        ]);
+        const [ov, s, vehicles] = await Promise.all([get(`/api/analytics/overview?${q}`), get(`/api/analytics/series?${q}`), get(`/api/analytics/vehicles?${q}`)]);
         if (!alive || my !== seq) return;
-        $('#anRange', main).textContent = `${rangeText(range)} · ${ov.days} kun · taqqoslash: ${rangeText(ov.previousRange)}`;
-        setHtml($('#anKpis', main), html`${KPIS.map((d) => tileHtml(d, ov.current, ov.previous))}`);
-        bars('chTrips', series, 'trips', 'reys');
-        bars('chKm', series, 'km', 'km');
-        bars('chActive', series, 'active', 'ta transport');
-        drawTurn(turn);
-        drawHeat(grid);
-        table.set(vehicles);
-        drawOutsiders(outsiders);
-      } catch (e) {
-        if (alive && my === seq) toastError(e);
-      } finally {
-        if (my === seq) body.classList.remove('is-loading');
-      }
+        $('#anRange', main).textContent = `${rangeText(range)} · oldingi ${ov.days} kunga nisbatan`;
+        setHtml($('#anKpis', main), html`${KPIS.map((d) => tile(d, ov.current, ov.previous))}`);
+        series = s;
+        drawChart();
+        setHtml($('#anAtt', main), attention(ov.current, vehicles));
+        drawTable(vehicles);
+      } catch (e) { if (alive && my === seq) toastError(e); }
     };
 
-    rangeControl($('#anRangeCtl', main), {
-      presets: ['today', 'yesterday', 'd7', 'd30', 'month'],
-      value: range,
-      onChange: (r) => { range = r; replaceQuery('tahlil', range); load(); },
+    $('#anPreset', main).addEventListener('click', (e) => {
+      const b = e.target.closest('[data-p]');
+      if (!b) return;
+      range = presetRange(b.dataset.p);
+      replaceQuery('tahlil', range);
+      load();
     });
-    $('#hmDir', main).addEventListener('click', (e) => {
-      const b = e.target.closest('[data-d]');
-      if (!b || b.dataset.d === direction) return;
-      direction = b.dataset.d;
-      for (const x of $('#hmDir', main).children) x.setAttribute('aria-pressed', String(x === b));
-      loadHeat();
+    $('#anMetric', main).addEventListener('click', (e) => {
+      const b = e.target.closest('[data-m]');
+      if (!b || b.dataset.m === metric) return;
+      metric = b.dataset.m;
+      for (const x of $('#anMetric', main).children) x.setAttribute('aria-pressed', String(x === b));
+      drawChart();
     });
-    $('#anCsv', main).addEventListener('click', () => {
-      if (!table.rows().length) return toastError(new Error("Eksport uchun ma'lumot yo'q"));
-      return table.csv(`tahlil_${range.from}_${range.to}.csv`);
-    });
+    $('#anTable', main).addEventListener('click', (e) => { const r = e.target.closest('tr[data-id]'); if (r) location.hash = `#/transport/${r.dataset.id}`; });
 
     await load();
-    return () => {
-      alive = false;
-      for (const d of disposers.values()) d();
-      disposers.clear();
-    };
+    return () => { alive = false; dispose?.(); };
   },
 };

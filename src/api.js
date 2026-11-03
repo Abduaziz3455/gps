@@ -302,9 +302,6 @@ function buildApi(ctx) {
   r.get('/api/analytics/overview', (req) => { owner(req); const { from, to } = range(req.query); return analytics.overview(from, to); });
   r.get('/api/analytics/series', (req) => { owner(req); const { from, to } = range(req.query, 30); return analytics.series(from, to); });
   r.get('/api/analytics/vehicles', (req) => { owner(req); const { from, to } = range(req.query); return analytics.byVehicle(from, to); });
-  r.get('/api/analytics/heatmap', (req) => { owner(req); const { from, to } = range(req.query, 28); return analytics.heatmap(from, to, ['in', 'out'].includes(req.query.direction) ? req.query.direction : null); });
-  r.get('/api/analytics/turnaround', (req) => { owner(req); const { from, to } = range(req.query); return analytics.turnaround(from, to); });
-  r.get('/api/analytics/outsiders', (req) => { owner(req); const { from, to } = range(req.query); return analytics.outsiders(from, to); });
   r.get('/api/reports/vehicles', (req) => { user(req); const { from, to } = range(req.query, 1); return analytics.report(from, to); });
   r.post('/api/analytics/recompute', async (req) => {
     owner(req);

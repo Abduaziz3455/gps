@@ -256,38 +256,6 @@ class Analytics {
     }));
   }
 
-  /** Gate passes by ISO weekday (1-7) x hour (0-23). */
-  heatmap(from, to, direction = null) {
-    const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
-    const rows = this.h.all(`SELECT t FROM gate_events WHERE t >= ? AND t < ? AND status NOT IN ('vetoed','pending')
-      ${direction ? 'AND direction = ?' : ''}`, T.dayStart(from), T.dayStart(to) + T.DAY, ...(direction ? [direction] : []));
-    for (const { t } of rows) grid[T.weekdayOf(t) - 1][T.hourOf(t)]++;
-    return grid;
-  }
-
-  /** Turnaround (exit -> next entry) distribution, in 30-minute buckets up to 6 h. */
-  turnaround(from, to) {
-    const start = T.dayStart(from), end = T.dayStart(to) + T.DAY;
-    const outs = this.h.all(`SELECT vehicle_id, t FROM gate_events WHERE direction = 'out' AND vehicle_id IN (SELECT id FROM vehicles WHERE active = 1)
-      AND status IN ${COUNTED} AND t >= ? AND t < ?`, start, end);
-    const buckets = Array(13).fill(0); // 0-30, ..., 330-360, >360
-    for (const e of outs) {
-      const next = this.h.get(`SELECT MIN(t) t FROM gate_events WHERE vehicle_id = ? AND direction = 'in' AND status IN ${COUNTED}
-        AND t > ? AND t < ?`, e.vehicle_id, e.t, e.t + TURNAROUND_MAX_MS)?.t;
-      if (next) buckets[Math.min(12, Math.floor((next - e.t) / 1800e3))]++;
-    }
-    return buckets;
-  }
-
-  /** Vehicles outside the fleet seen at the gate: visits and average time inside. */
-  outsiders(from, to, limit = 50) {
-    const start = T.dayStart(from), end = T.dayStart(to) + T.DAY;
-    return this.h.all(`SELECT plate, SUM(direction = 'in') visits, AVG(CASE WHEN direction = 'out' THEN stay_s END) stay_s, MAX(t) last_t
-      FROM gate_events WHERE vehicle_id IS NULL AND plate_valid = 1 AND status IN ('outside','history') AND t >= ? AND t < ?
-      GROUP BY plate ORDER BY visits DESC, last_t DESC LIMIT ?`, start, end, limit)
-      .map((r) => ({ plate: prettyPlate(r.plate), visits: r.visits, stayMin: r.stay_s ? Math.round(r.stay_s / 60) : null, lastT: r.last_t }));
-  }
-
   /** Daily table (reports page): one row per vehicle for a day range. */
   report(from, to) {
     return this.byVehicle(from, to);

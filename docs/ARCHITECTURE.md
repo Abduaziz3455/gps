@@ -119,7 +119,7 @@ Two roles. The owner sees everything the dispatcher sees.
 | **Darvoza** (gate & yard) | ✓ | ✓ | Live feed of entries/exits with photos and the GPS check; who is inside now and for how long; today's counts; filters; photo viewer |
 | **Ogohlantirishlar** (alerts) | ✓ | ✓ | Rule hits (section 7), acknowledge, filter |
 | **Transport** (vehicle page) | ✓ | ✓ | One vehicle over a date range: track replay with stops, gate events, daily km / fuel / trips, refuels and drains |
-| **Tahlil** (analytics) | — | ✓ | KPIs and trends (section 6) |
+| **Tahlil** (analytics) | — | ✓ | At a glance: trips, km, fuel and utilization vs the previous period; daily trips or km; what needs attention (fuel drains, speeding, over-norm fuel, idle vehicles, outside vehicles); vehicles ranked by trips. The full table is in Hisobot |
 | **Hisobotlar** (reports) | ✓ | ✓ | Daily and monthly tables per vehicle, CSV export |
 | **Sozlamalar** (settings) | own notifications | ✓ | Users (create, reset password, disable, role), vehicles (type, plate), alert thresholds, yard, system health |
 
@@ -152,10 +152,13 @@ Per day, per vehicle and for the fleet; ranges: today, yesterday, 7 / 30 days, t
 | **Fuel drains** | GPS `fuelInOut` | theft suspicion — always alerted |
 | Turnaround (exit → next entry) | cameras | delivery cycle time |
 | Time inside the yard (entry → exit) | cameras | loading queue |
-| Gate traffic by hour × weekday | cameras | busiest hours; staff planning |
 | Outside vehicles | cameras | suppliers and visitors: count and time inside |
 | Max speed, speeding | position samples | safety |
 | Data health | positions, NVR, GPS | vehicles without signal, camera reads not matched to GPS |
+
+The Tahlil page keeps to the headline: trips, km, fuel and utilization against the previous period, one daily
+chart, and an attention list. Per-vehicle detail (engine hours, idling, turnaround, refuels, max speed) is in the
+Hisobot table and on each vehicle's page.
 
 ## 7. Alerts and push notifications
 
