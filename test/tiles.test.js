@@ -10,7 +10,7 @@ const listen = (handler) => new Promise((resolve) => {
 });
 
 /** A fake tile server, and our route in front of it. */
-async function rig(t, upstream, publicOrigin = 'https://tbb-gps.uz') {
+async function rig(t, upstream, publicOrigin = 'https://site.example') {
   const seen = [];
   const osm = await listen((req, res) => { seen.push(req); upstream(req, res); });
   const warnings = [];
@@ -49,9 +49,15 @@ test('a tile: asks with our identity, returns the image and the caching rules, p
   assert.equal(res.headers.get('cache-control'), 'private, max-age=1000');
   const sent = r.seen[0].headers;
   assert.equal(r.seen[0].url, '/13/5674/3064.png');
-  assert.equal(sent.referer, 'https://tbb-gps.uz/');
+  assert.equal(sent.referer, 'https://site.example/');
   assert.match(sent['user-agent'], /^TBB-Dispatcher\/\d/);
   assert.equal(sent.cookie, undefined, "the user's session never leaves our server");
+});
+
+test('without a configured address (development) the request still carries a Referer', async (t) => {
+  const r = await rig(t, (req, res) => tile(res), '');
+  assert.equal((await r.get('/1/0/0')).status, 200);
+  assert.equal(r.seen[0].headers.referer, 'https://tbb-gps.uz/');
 });
 
 test('a tile the browser already has: 304 passes through', async (t) => {

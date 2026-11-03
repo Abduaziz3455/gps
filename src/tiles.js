@@ -24,8 +24,8 @@ async function serveTile(req, res, params, { config, log }) {
   const url = tileUrl(params, config.tiles.url);
   if (!url) throw httpError(404, 'Topilmadi');
 
-  const headers = { 'User-Agent': `TBB-Dispatcher/${version} (+${config.publicOrigin || 'https://tbb-gps.uz'})` };
-  if (config.publicOrigin) headers.Referer = `${config.publicOrigin}/`;
+  const origin = config.publicOrigin || 'https://tbb-gps.uz'; // a request without a Referer gets blocked, also in development
+  const headers = { 'User-Agent': `TBB-Dispatcher/${version} (+${origin})`, Referer: `${origin}/` };
   if (req.headers['if-none-match']) headers['If-None-Match'] = req.headers['if-none-match'];
 
   let up;
