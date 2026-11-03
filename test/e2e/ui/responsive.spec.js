@@ -157,6 +157,19 @@ test('the yard can be found at any zoom', async ({ page, signIn }) => {
   await expect(label).toBeVisible();
 });
 
+test('phone: the yard\'s name is not hidden behind the map buttons', async ({ page, signIn }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn('owner');
+  await expect(page.locator('.yard-label')).toBeVisible();
+  await page.waitForTimeout(400);
+  const hit = await page.evaluate(() => {
+    const y = document.querySelector('.yard-label').getBoundingClientRect();
+    return [...document.querySelectorAll('.map-tools .btn, .leaflet-control-zoom')].map((e) => e.getBoundingClientRect())
+      .some((b) => y.left < b.right && b.left < y.right && y.top < b.bottom && b.top < y.bottom);
+  });
+  expect(hit).toBe(false);
+});
+
 test('parked trucks show their labels once zoomed in', async ({ page, signIn }) => {
   await signIn('owner');
   await page.setViewportSize({ width: 1440, height: 900 });

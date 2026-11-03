@@ -186,7 +186,8 @@ export class VehicleLayer {
   _fitTo(points, padding, animate) {
     const yard = state.me?.yard;
     const pts = yard && points.length ? [...points, L.latLng(yard.lat, yard.lng)] : points;
-    if (pts.length) this.map.fitBounds(L.latLngBounds(pts), { padding: [padding, padding], maxZoom: 15, animate });
+    // More room on top: the map's buttons and the yard's name sit there.
+    if (pts.length) this.map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [padding, padding + 44], paddingBottomRight: [padding, padding], maxZoom: 15, animate });
   }
 
   clear() { for (const m of this.markers.values()) m.remove(); this.markers.clear(); }
