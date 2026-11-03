@@ -69,8 +69,9 @@ export default {
         <div class="ev-time">${hms(ev.t)}<small>${ev.camera}</small></div></div>`;
     };
 
-    const matches = (ev) => (!f.direction || ev.direction === f.direction) && (!f.kind || (f.kind === 'fleet') === !!ev.vehicleId)
-      && f.day === today() && (f.all || ev.status !== 'vetoed') && (!f.plate || `${ev.plate || ''}${ev.plateRaw || ''}`.includes(f.plate.toUpperCase().replace(/\s/g, '')));
+    const passesFilters = (ev) => (!f.direction || ev.direction === f.direction) && (!f.kind || (f.kind === 'fleet') === !!ev.vehicleId)
+      && (f.all || ev.status !== 'vetoed') && (!f.plate || `${ev.plate || ''}${ev.plateRaw || ''}`.includes(f.plate.toUpperCase().replace(/\s/g, '')));
+    const matches = (ev) => f.day === today() && passesFilters(ev);
 
     async function load(append = false) {
       const params = { from: f.day, to: f.day, direction: f.direction, kind: f.kind, plate: f.plate, status: f.all ? 'all' : '', limit: 60 };
@@ -78,7 +79,7 @@ export default {
       try {
         const rows = await get(`/api/gate-events?${qs(params)}`);
         events = append ? events.concat(rows) : rows;
-        more = rows.length === 60;
+        more = rows.length >= 60; // a page can run over: the server keeps events of the same second together
         renderFeed();
       } catch (e) { toastError(e); }
     }
@@ -161,7 +162,11 @@ export default {
     $('#gPlate', main).addEventListener('input', debounce((e) => { f.plate = e.target.value.trim(); load(); }, 300));
     $('#moreBtn', main).onclick = () => load(true);
     feed.addEventListener('click', (e) => { const r = e.target.closest('.ev'); if (r) openEvent(Number(r.dataset.id)); });
-    feed.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const r = e.target.closest('.ev'); if (r) openEvent(Number(r.dataset.id)); } });
+    feed.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const r = e.target.closest('.ev');
+      if (r) { e.preventDefault(); openEvent(Number(r.dataset.id)); }
+    });
 
     const sideSoon = debounce(loadSide, 800);
     const offs = [
@@ -176,9 +181,16 @@ export default {
       state.on('gate:update', (ev) => {
         const i = events.findIndex((x) => x.id === ev.id);
         if (i >= 0) {
-          events[i] = ev;
           const node = feed.querySelector(`.ev[data-id="${CSS.escape(String(ev.id))}"]`);
-          if (node) node.outerHTML = String(evHtml(ev));
+          if (passesFilters(ev)) {
+            events[i] = ev;
+            if (node) node.outerHTML = String(evHtml(ev));
+          } else {
+            // e.g. just hidden, or reassigned while the feed shows outside vehicles only
+            events.splice(i, 1);
+            node?.remove();
+            if (!events.length) renderFeed();
+          }
         }
         sideSoon();
       }),

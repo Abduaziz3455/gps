@@ -43,7 +43,12 @@ export function connectStream() {
     es.onopen = () => state.emit('stream', true);
     es.onerror = () => {
       state.emit('stream', false);
-      if (es.readyState === EventSource.CLOSED) { setTimeout(open, retry); retry = Math.min(retry * 2, 30000); }
+      if (es.readyState === EventSource.CLOSED) {
+        // The server refused the stream. If the session has ended, this request takes the app back to the login form.
+        api('/api/me').catch(() => {});
+        setTimeout(open, retry);
+        retry = Math.min(retry * 2, 30000);
+      }
     };
   };
   open();

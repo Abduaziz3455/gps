@@ -31,6 +31,7 @@ function showLogin() {
   $('#app').hidden = true;
   $('#login').hidden = false;
   const form = $('#loginForm');
+  form.username.focus(); // the autofocus attribute does nothing here: the form was hidden when the page loaded
   form.onsubmit = async (e) => {
     e.preventDefault();
     const err = $('#loginError');
@@ -92,6 +93,9 @@ function wireHeader() {
   const drop = $('#userDrop'), btn = $('#userBtn');
   btn.onclick = (e) => { e.stopPropagation(); drop.hidden = !drop.hidden; btn.setAttribute('aria-expanded', String(!drop.hidden)); };
   document.addEventListener('click', () => { drop.hidden = true; btn.setAttribute('aria-expanded', 'false'); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !drop.hidden) { drop.hidden = true; btn.setAttribute('aria-expanded', 'false'); btn.focus(); }
+  });
   $('#logoutBtn').onclick = async () => {
     try { await post('/api/auth/logout'); } catch { /* ignore */ }
     location.hash = '';

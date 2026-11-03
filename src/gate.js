@@ -113,7 +113,7 @@ class Gate {
         caps.push(...list.filter((c) => c.time >= since));
       } catch (e) {
         ok = false;
-        this.lastError = `ch${ch}: ${e.message}`;
+        this.lastError = `ch${ch}: ${this.safeError(e)}`;
         this.log.warn?.(`capture search on ch${ch} failed: ${e.message}`);
       }
     }
@@ -130,6 +130,16 @@ class Gate {
       if (d.emit) await this.onDecision(d, mode);
     }
     return n;
+  }
+
+  /** An NVR error for people to read: network errors carry the plant's address, which stays on the server. */
+  safeError(e) {
+    let msg = String(e?.message || e);
+    try {
+      const { hostname } = new URL(this.ncfg.host);
+      if (hostname) msg = msg.split(hostname).join('NVR');
+    } catch { /* no host configured */ }
+    return msg.replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, 'NVR');
   }
 
   async onDecision(d, mode) {

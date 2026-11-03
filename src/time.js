@@ -18,6 +18,13 @@ function dayStart(day) {
   return Date.parse(`${day}T00:00:00Z`) - OFF();
 }
 
+/** A real calendar day in a sensible range: '2026-13-45' and '2026-02-31' match the pattern but aren't days. */
+function isDay(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s) || s < '2000' || s >= '2101') return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
 function addDays(day, n) {
   return dayOf(dayStart(day) + n * DAY + 1);
 }
@@ -69,4 +76,4 @@ function parseHm(s) {
   return h * 60 + (m || 0);
 }
 
-module.exports = { DAY, dayOf, dayStart, addDays, today, daysBetween, localIso, parseApiTime, hourOf, weekdayOf, minuteOfDay, parseHm };
+module.exports = { DAY, dayOf, dayStart, isDay, addDays, today, daysBetween, localIso, parseApiTime, hourOf, weekdayOf, minuteOfDay, parseHm };

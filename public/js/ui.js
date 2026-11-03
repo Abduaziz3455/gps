@@ -81,6 +81,12 @@ export const hms = (ms) => (ms ? fTimeS.format(ms) : '—');
 /** 'YYYY-MM-DD' of the Tashkent day containing `ms`. */
 export const dayOf = (ms = Date.now()) => fDay.format(ms);
 export const today = () => dayOf(Date.now());
+/** A real calendar day: '2026-13-45' matches the pattern but isn't one. Same rule as the server (src/time.js). */
+export function isDay(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s) || s < '2000' || s >= '2101') return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
 export function addDays(day, n) {
   const d = new Date(`${day}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);
@@ -156,7 +162,19 @@ export function modal({ title, body = '', foot = '', size = '' }) {
   if (footEl) { if (foot instanceof Node) footEl.append(foot); else if (foot) footEl.innerHTML = String(foot); else footEl.remove(); }
   const prev = document.activeElement;
   const close = () => { back.remove(); document.removeEventListener('keydown', onKey); prev?.focus?.(); };
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') close();
+    else if (e.key === 'Tab') {
+      // Keep the keyboard inside the dialog (aria-modal): the page behind it can't be used.
+      const items = $$('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])', m).filter((x) => x.offsetParent !== null);
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1], cur = document.activeElement;
+      if (!m.contains(cur) || (e.shiftKey && cur === first) || (!e.shiftKey && cur === last)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    }
+  };
   back.addEventListener('click', (e) => { if (e.target === back || e.target.closest('[data-close]')) close(); });
   document.addEventListener('keydown', onKey);
   $('#modalRoot').append(back);
@@ -173,16 +191,22 @@ export function confirmDialog(title, text, okLabel = 'Tasdiqlash', danger = fals
 }
 export function lightbox(src) {
   const b = el(`<div class="lightbox" role="dialog" aria-label="Rasm"><img alt="" src="${esc(src)}"></div>`);
-  const close = () => { b.remove(); document.removeEventListener('keydown', k); };
-  const k = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => { b.remove(); document.removeEventListener('keydown', k, true); };
+  // Capture phase: Escape closes the photo only, not the dialog it was opened from.
+  const k = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
   b.addEventListener('click', close);
-  document.addEventListener('keydown', k);
+  document.addEventListener('keydown', k, true);
   document.body.append(b);
 }
 
 // --- CSV ---
 export function downloadCsv(name, header, rows) {
-  const cell = (v) => { const s = String(v ?? ''); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const cell = (v) => {
+    let s = String(v ?? '');
+    // A cell starting like a formula would run in Excel; negative numbers are left alone.
+    if (/^[=+@\t\r]|^-(?!\d)/.test(s)) s = `'${s}`;
+    return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
   const text = '﻿' + [header, ...rows].map((r) => r.map(cell).join(';')).join('\r\n');
   const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
   const a = Object.assign(document.createElement('a'), { href: url, download: name });

@@ -25,6 +25,10 @@ function verifyPassword(password, stored) {
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
+// Checked when the user doesn't exist, so a login takes the same time either way and doesn't reveal who has an account.
+let dummyHash = null;
+const dummy = () => (dummyHash ||= hashPassword(crypto.randomBytes(16).toString('hex')));
+
 function validatePassword(pw) {
   if (typeof pw !== 'string' || pw.length < 8) return "Parol kamida 8 belgidan iborat bo'lishi kerak";
   return null;
@@ -34,7 +38,31 @@ class Auth {
   constructor({ h, config }) {
     this.h = h;
     this.cfg = config;
-    this.attempts = new Map(); // ip -> {n, until}
+    this.attempts = new Map(); // ip, or "pw:<user id>" -> {n, until}
+  }
+
+  _checkLock(key, now) {
+    const a = this.attempts.get(key);
+    if (a && a.until > now) throw httpError(429, "Juda ko'p urinish. 10 daqiqadan keyin qayta urinib ko'ring");
+  }
+
+  _countFailure(key, now) {
+    const a = this.attempts.get(key);
+    const n = (a && a.until <= now && a.n >= 8 ? 0 : a?.n || 0) + 1;
+    this.attempts.set(key, { n, until: n >= 8 ? now + 10 * 60e3 : 0 });
+  }
+
+  /** The current password, before changing it. Throttled: a stolen session must not allow unlimited guesses. */
+  checkPassword(userId, password) {
+    const key = `pw:${userId}`;
+    const now = Date.now();
+    this._checkLock(key, now);
+    const u = this.h.get('SELECT pass_hash FROM users WHERE id = ?', userId);
+    if (!u || !verifyPassword(password || '', u.pass_hash)) {
+      this._countFailure(key, now);
+      throw httpError(400, "Joriy parol noto'g'ri");
+    }
+    this.attempts.delete(key);
   }
 
   ensureOwner(log = console) {
@@ -50,7 +78,8 @@ class Auth {
   }
 
   createUser({ username, name, role, password }) {
-    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username || '')) throw httpError(400, "Login 3-32 belgi: harf, raqam, . _ -");
+    if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{3,32}$/.test(username)) throw httpError(400, "Login 3-32 belgi: harf, raqam, . _ -");
+    if (name !== undefined && name !== null && typeof name !== 'string') throw httpError(400, "Ism noto'g'ri");
     if (!ROLES.includes(role)) throw httpError(400, "Noto'g'ri rol");
     const pwErr = validatePassword(password);
     if (pwErr) throw httpError(400, pwErr);
@@ -69,18 +98,25 @@ class Auth {
       throw httpError(400, "Kamida bitta faol rahbar (owner) qolishi kerak");
     }
     if (actor && actor.id === id && disabled) throw httpError(400, "O'zingizni o'chira olmaysiz");
-    if (name !== undefined) this.h.run('UPDATE users SET name = ? WHERE id = ?', String(name).slice(0, 80), id);
-    if (role !== undefined) this.h.run('UPDATE users SET role = ? WHERE id = ?', role, id);
-    if (disabled !== undefined) {
-      this.h.run('UPDATE users SET disabled = ? WHERE id = ?', disabled ? 1 : 0, id);
-      if (disabled) this.h.run('DELETE FROM sessions WHERE user_id = ?', id);
-    }
+    // Everything is checked first: a refused request changes nothing.
+    if (name !== undefined && typeof name !== 'string') throw httpError(400, "Ism noto'g'ri");
     if (password !== undefined) {
       const err = validatePassword(password);
       if (err) throw httpError(400, err);
-      this.h.run('UPDATE users SET pass_hash = ? WHERE id = ?', hashPassword(password), id);
-      this.h.run('DELETE FROM sessions WHERE user_id = ?', id);
     }
+    const passHash = password !== undefined ? hashPassword(password) : null;
+    this.h.tx(() => {
+      if (name !== undefined) this.h.run('UPDATE users SET name = ? WHERE id = ?', name.slice(0, 80), id);
+      if (role !== undefined) this.h.run('UPDATE users SET role = ? WHERE id = ?', role, id);
+      if (disabled !== undefined) {
+        this.h.run('UPDATE users SET disabled = ? WHERE id = ?', disabled ? 1 : 0, id);
+        if (disabled) this.h.run('DELETE FROM sessions WHERE user_id = ?', id);
+      }
+      if (passHash) {
+        this.h.run('UPDATE users SET pass_hash = ? WHERE id = ?', passHash, id);
+        this.h.run('DELETE FROM sessions WHERE user_id = ?', id);
+      }
+    });
     return this.user(id);
   }
 
@@ -106,13 +142,11 @@ class Auth {
   /** Throttle: 8 failures per IP -> locked for 10 minutes. */
   login(username, password, { ip, ua }) {
     const now = Date.now();
-    const a = this.attempts.get(ip);
-    if (a && a.until > now) throw httpError(429, "Juda ko'p urinish. 10 daqiqadan keyin qayta urinib ko'ring");
+    this._checkLock(ip, now);
     const u = this.h.get('SELECT * FROM users WHERE username = ?', String(username || ''));
-    const ok = u && !u.disabled && verifyPassword(password || '', u.pass_hash);
-    if (!ok) {
-      const n = (a && a.until <= now && a.n >= 8 ? 0 : a?.n || 0) + 1;
-      this.attempts.set(ip, { n, until: n >= 8 ? now + 10 * 60e3 : 0 });
+    const matches = verifyPassword(password || '', u ? u.pass_hash : dummy()); // always hash: same time for unknown users
+    if (!u || u.disabled || !matches) {
+      this._countFailure(ip, now);
       throw httpError(401, "Login yoki parol noto'g'ri");
     }
     this.attempts.delete(ip);

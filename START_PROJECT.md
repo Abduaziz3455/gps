@@ -41,8 +41,9 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Expect: `GPS fleet: 20 vehicles`, `camera history: importing 30 days`, then `rollup ... done` for 30 days
-(a few minutes: GoGPS allows one request per second).
+Expect: `GPS fleet: 20 vehicles`, `camera history: importing 30 days`, then `rollup ... done` for 30 days.
+The rollups take **about 25 minutes**: GoGPS needs 45-55 s per day for its reports. The live map and gate work
+meanwhile; Tahlil and Hisobot fill in from the oldest day to the newest.
 
 ```bash
 curl -s http://127.0.0.1:8090/health

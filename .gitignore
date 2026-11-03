@@ -6,3 +6,6 @@ node_modules/
 .DS_Store
 .claude/
 data/
+
+# end-to-end test output
+test/e2e/.output/

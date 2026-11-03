@@ -47,17 +47,22 @@ class Router {
     for (const r of this.routes) {
       if (r.method !== method) continue;
       const m = r.re.exec(pathname);
-      if (m) return { handlers: r.handlers, params: Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])) };
+      if (m) return { handlers: r.handlers, params: Object.fromEntries(r.keys.map((k, i) => [k, safeDecode(m[i + 1])])) };
     }
     return null;
   }
+}
+
+/** decodeURIComponent that keeps malformed input as it is (it comes straight from the client). */
+function safeDecode(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
 }
 
 function parseCookies(header) {
   const out = {};
   for (const part of String(header || '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i > 0) out[part.slice(0, i).trim()] = safeDecode(part.slice(i + 1).trim());
   }
   return out;
 }
@@ -102,7 +107,7 @@ function serveFile(req, res, root, rel, { cache = 'no-cache' } = {}) {
   res.statusCode = 200;
   res.setHeader('Content-Length', st.size);
   if (req.method === 'HEAD') { res.end(); return true; }
-  fs.createReadStream(file).pipe(res);
+  fs.createReadStream(file).on('error', () => res.destroy()).pipe(res);
   return true;
 }
 

@@ -92,9 +92,11 @@ async function start() {
   const leafletDir = path.join(__dirname, 'node_modules', 'leaflet', 'dist');
   const version = require('./package.json').version;
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, 'http://local');
+  const badRequest = (res) => { res.statusCode = 400; res.end('Bad request'); };
+  const handle = async (req, res) => {
     securityHeaders(res, cfg.env === 'production');
+    let url;
+    try { url = new URL(req.url, 'http://local'); } catch { return badRequest(res); }
     if (url.pathname === '/health' || url.pathname === '/healthz') {
       return json(res, 200, { status: 'ok', version, uptime: Math.round(process.uptime()), gps: poller ? !!poller.lastOk : null, nvr: gate ? !!gate.nvr.lastOk : null });
     }
@@ -102,13 +104,25 @@ async function start() {
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.statusCode = 405; return res.end(); }
     if (url.pathname.startsWith('/vendor/leaflet/')) {
       if (serveFile(req, res, leafletDir, url.pathname.slice('/vendor/leaflet/'.length), { cache: 'public, max-age=604800' })) return;
-    } else if (url.pathname !== '/' && url.pathname !== '/index.html') {
-      const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+      res.statusCode = 404;
+      return res.end('Not found');
+    }
+    if (url.pathname !== '/' && url.pathname !== '/index.html') {
+      let rel;
+      try { rel = decodeURIComponent(url.pathname).replace(/^\/+/, ''); } catch { return badRequest(res); }
       const cache = rel === 'sw.js' ? 'no-cache' : 'public, max-age=300';
       if (serveFile(req, res, publicDir, rel, { cache })) return;
       if (path.extname(rel)) { res.statusCode = 404; return res.end('Not found'); }
     }
     serveFile(req, res, publicDir, 'index.html', { cache: 'no-cache' });
+  };
+  // A request must never be able to take the process down: nothing may escape as an unhandled rejection.
+  const server = http.createServer((req, res) => {
+    handle(req, res).catch((e) => {
+      log.error(`${req.method} ${String(req.url).slice(0, 200)}: ${e.stack || e.message}`);
+      if (!res.headersSent) json(res, 500, { error: 'Server xatosi' });
+      else res.destroy();
+    });
   });
 
   if (cfg.mock) await seedMock(ctx);

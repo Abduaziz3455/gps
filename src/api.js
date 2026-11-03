@@ -12,7 +12,6 @@ const { vehicleLabel, vehicleType, prettyPlate, plateKey } = require('./gps/norm
 const { view: gateView } = require('./gate');
 
 const VEHICLE_TYPES = ['auto', 'mixer', 'dump', 'excavator', 'car', 'other'];
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function buildApi(ctx) {
   const { h, config, auth, poller, gate, analytics, rules, push, gps, health: monitor } = ctx;
@@ -23,12 +22,14 @@ function buildApi(ctx) {
   const owner = (req) => { user(req); if (req.user.role !== 'owner') throw httpError(403, "Bu bo'lim faqat rahbar uchun"); };
 
   const range = (q, defDays = 7) => {
-    const to = DAY_RE.test(q.to || '') ? q.to : T.today();
-    const from = DAY_RE.test(q.from || '') ? q.from : T.addDays(to, -(defDays - 1));
+    const to = T.isDay(q.to) ? q.to : T.today();
+    const from = T.isDay(q.from) ? q.from : T.addDays(to, -(defDays - 1));
     if (from > to) throw httpError(400, "Sana oralig'i noto'g'ri");
-    if (T.daysBetween(from, to).length > 400) throw httpError(400, "Oraliq juda katta (400 kundan ko'p)");
+    if ((T.dayStart(to) - T.dayStart(from)) / T.DAY + 1 > 400) throw httpError(400, "Oraliq juda katta (400 kundan ko'p)");
     return { from, to };
   };
+  /** A row limit from the query: positive, capped. (LIMIT -1 would mean "no limit" in SQLite.) */
+  const limitParam = (v, def, max = 500) => { const n = Math.floor(Number(v)); return n > 0 ? Math.min(max, n) : def; };
   const intParam = (v, name) => { const n = Number(v); if (!Number.isInteger(n)) throw httpError(400, `${name} noto'g'ri`); return n; };
 
   // --- vehicles / live -------------------------------------------------------------------------
@@ -61,15 +62,26 @@ function buildApi(ctx) {
     const id = intParam(p.id, 'id');
     if (!h.get('SELECT 1 FROM vehicles WHERE id = ?', id)) throw httpError(404, 'Transport topilmadi');
     const b = req.body;
-    if ('type' in b) { if (!VEHICLE_TYPES.includes(b.type)) throw httpError(400, "Noto'g'ri tur"); h.run('UPDATE vehicles SET type = ? WHERE id = ?', b.type, id); }
+    // Everything is checked first: a refused request changes nothing.
+    if ('type' in b && !VEHICLE_TYPES.includes(b.type)) throw httpError(400, "Noto'g'ri tur");
+    const text = (k) => { if (b[k] !== null && typeof b[k] !== 'string') throw httpError(400, `${k} noto'g'ri`); return b[k]; };
+    let plate = null, display = null, fuelNorm = null;
     if ('plate' in b) {
-      const pl = b.plate ? plateKey(b.plate) : null;
-      if (pl && h.get('SELECT 1 FROM vehicles WHERE plate = ? AND id != ?', pl, id)) throw httpError(409, 'Bu raqam boshqa transportga biriktirilgan');
-      h.run('UPDATE vehicles SET plate = ? WHERE id = ?', pl, id);
+      plate = plateKey(text('plate')) || null;
+      if (plate && h.get('SELECT 1 FROM vehicles WHERE plate = ? AND id != ?', plate, id)) throw httpError(409, 'Bu raqam boshqa transportga biriktirilgan');
     }
-    if ('display' in b) h.run('UPDATE vehicles SET display = ? WHERE id = ?', b.display ? String(b.display).slice(0, 40) : null, id);
-    if ('fuelNorm' in b) h.run('UPDATE vehicles SET fuel_norm = ? WHERE id = ?', b.fuelNorm === null || b.fuelNorm === '' ? null : Number(b.fuelNorm) || null, id);
-    if ('active' in b) h.run('UPDATE vehicles SET active = ? WHERE id = ?', b.active ? 1 : 0, id);
+    if ('display' in b) display = text('display') ? b.display.slice(0, 40) : null;
+    if ('fuelNorm' in b && b.fuelNorm !== null && b.fuelNorm !== '') {
+      fuelNorm = Number(b.fuelNorm);
+      if (!(fuelNorm > 0) || !Number.isFinite(fuelNorm)) throw httpError(400, "Norma musbat son bo'lishi kerak");
+    }
+    h.tx(() => {
+      if ('type' in b) h.run('UPDATE vehicles SET type = ? WHERE id = ?', b.type, id);
+      if ('plate' in b) h.run('UPDATE vehicles SET plate = ? WHERE id = ?', plate, id);
+      if ('display' in b) h.run('UPDATE vehicles SET display = ? WHERE id = ?', display, id);
+      if ('fuelNorm' in b) h.run('UPDATE vehicles SET fuel_norm = ? WHERE id = ?', fuelNorm, id);
+      if ('active' in b) h.run('UPDATE vehicles SET active = ? WHERE id = ?', b.active ? 1 : 0, id);
+    });
     bus.emit('vehicles');
     const v = h.get('SELECT * FROM vehicles WHERE id = ?', id);
     return { ...liveView(v, poller?.live.get(id)), rawType: v.type, fuelNorm: v.fuel_norm, display: v.display };
@@ -89,7 +101,7 @@ function buildApi(ctx) {
   r.get('/api/vehicles/:id/track', (req, res, p) => {
     user(req);
     const id = intParam(p.id, 'id');
-    const day = DAY_RE.test(req.query.day || '') ? req.query.day : T.today();
+    const day = T.isDay(req.query.day) ? req.query.day : T.today();
     const from = T.dayStart(day), to = from + T.DAY;
     const pts = h.all('SELECT t, lat, lng, speed, course, status FROM positions WHERE vehicle_id = ? AND t >= ? AND t < ? ORDER BY t', id, from, to);
     // Stops: runs of non-moving samples lasting 5 min or more.
@@ -133,7 +145,7 @@ function buildApi(ctx) {
     user(req);
     const id = intParam(p.id, 'id');
     if (!gps) throw httpError(503, 'GPS ulanmagan');
-    const day = DAY_RE.test(req.query.day || '') ? req.query.day : T.today();
+    const day = T.isDay(req.query.day) ? req.query.day : T.today();
     const key = `${id}:${day}`;
     const hit = stopCache.get(key);
     if (hit && Date.now() - hit.at < (day === T.today() ? 5 * 60e3 : 3600e3)) return hit.data;
@@ -154,9 +166,9 @@ function buildApi(ctx) {
     user(req);
     const q = req.query;
     const where = [], args = [];
-    if (DAY_RE.test(q.from || '')) { where.push('t >= ?'); args.push(T.dayStart(q.from)); }
-    if (DAY_RE.test(q.to || '')) { where.push('t < ?'); args.push(T.dayStart(q.to) + T.DAY); }
-    if (q.before) { where.push('t < ?'); args.push(Number(q.before)); }
+    if (T.isDay(q.from)) { where.push('t >= ?'); args.push(T.dayStart(q.from)); }
+    if (T.isDay(q.to)) { where.push('t < ?'); args.push(T.dayStart(q.to) + T.DAY); }
+    if (q.before && Number.isFinite(Number(q.before))) { where.push('t < ?'); args.push(Number(q.before)); }
     if (q.direction === 'in' || q.direction === 'out') { where.push('direction = ?'); args.push(q.direction); }
     if (q.vehicle) { where.push('vehicle_id = ?'); args.push(Number(q.vehicle)); }
     if (q.kind === 'fleet') where.push('vehicle_id IS NOT NULL');
@@ -164,16 +176,24 @@ function buildApi(ctx) {
     if (q.plate) { where.push('(plate LIKE ? OR plate_raw LIKE ?)'); const s = `%${plateKey(q.plate)}%`; args.push(s, s); }
     if (q.status === 'hidden') where.push("status = 'vetoed'");
     else if (q.status !== 'all') where.push("status != 'vetoed'");
-    const limit = Math.min(500, Number(q.limit) || 100);
-    const rows = h.all(`SELECT * FROM gate_events ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY t DESC LIMIT ?`, ...args, limit);
+    const limit = limitParam(q.limit, 100);
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const rows = h.all(`SELECT * FROM gate_events ${clause} ORDER BY t DESC, id DESC LIMIT ?`, ...args, limit);
+    if (rows.length === limit) {
+      // The next page starts below this page's last time: events sharing that second must all be on this page.
+      const last = rows[rows.length - 1];
+      const seen = new Set(rows.map((g) => g.id));
+      const ties = h.all(`SELECT * FROM gate_events ${clause ? `${clause} AND` : 'WHERE'} t = ? ORDER BY id DESC`, ...args, last.t);
+      rows.push(...ties.filter((g) => !seen.has(g.id)));
+    }
     return rows.map((g) => gateView(g, h));
   });
 
   r.get('/api/gate-events/:id', (req, res, p) => {
     user(req);
-    const ev = gate?.get(intParam(p.id, 'id'));
-    if (!ev) throw httpError(404, 'Hodisa topilmadi');
-    return ev;
+    const row = h.get('SELECT * FROM gate_events WHERE id = ?', intParam(p.id, 'id'));
+    if (!row) throw httpError(404, 'Hodisa topilmadi');
+    return gateView(row, h);
   });
 
   /** Manual correction by a dispatcher: assign the right vehicle, or hide/restore an event. */
@@ -190,10 +210,11 @@ function buildApi(ctx) {
         vid, vid ? 'manual' : null, vid, `Qo'lda: ${req.user.name}`, id);
     }
     if ('hidden' in b) {
+      const { vehicle_id: vehicleNow } = h.get('SELECT vehicle_id FROM gate_events WHERE id = ?', id); // may just have changed above
       h.run("UPDATE gate_events SET status = ?, status_note = ?, resolve_at = NULL WHERE id = ?",
-        b.hidden ? 'vetoed' : (row.vehicle_id ? 'confirmed' : 'outside'), `Qo'lda: ${req.user.name}`, id);
+        b.hidden ? 'vetoed' : (vehicleNow ? 'confirmed' : 'outside'), `Qo'lda: ${req.user.name}`, id);
     }
-    const ev = gate.get(id);
+    const ev = gateView(h.get('SELECT * FROM gate_events WHERE id = ?', id), h);
     bus.emit('gate:update', ev);
     return ev;
   });
@@ -203,15 +224,16 @@ function buildApi(ctx) {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'private, max-age=86400');
-    fs.createReadStream(file).pipe(res);
+    fs.createReadStream(file).on('error', () => res.destroy()).pipe(res);
     return undefined;
   };
 
   r.get('/api/gate-events/:id/photo/:n', async (req, res, p) => {
     user(req);
     if (!gate) throw httpError(404, 'Kameralar ulanmagan');
+    const id = intParam(p.id, 'id'), n = intParam(p.n, 'n');
     let file;
-    try { file = await gate.photoFile(intParam(p.id, 'id'), intParam(p.n, 'n')); } catch (e) { throw httpError(502, `NVR: ${e.message}`); }
+    try { file = await gate.photoFile(id, n); } catch (e) { throw httpError(502, `NVR: ${gate.safeError(e)}`); }
     return sendJpeg(res, file);
   });
 
@@ -280,7 +302,7 @@ function buildApi(ctx) {
     if (q.state === 'open') where.push('acked_at IS NULL');
     if (q.type) { where.push('type = ?'); args.push(String(q.type)); }
     if (q.vehicle) { where.push('vehicle_id = ?'); args.push(Number(q.vehicle)); }
-    const limit = Math.min(500, Number(q.limit) || 200);
+    const limit = limitParam(q.limit, 200);
     return h.all(`SELECT * FROM alerts ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY t DESC LIMIT ?`, ...args, limit).map((a) => rules.view(a));
   });
   r.post('/api/alerts/:id/ack', (req, res, p) => {
@@ -304,7 +326,7 @@ function buildApi(ctx) {
   r.get('/api/reports/vehicles', (req) => { user(req); const { from, to } = range(req.query, 1); return analytics.report(from, to); });
   r.post('/api/analytics/recompute', async (req) => {
     owner(req);
-    const day = DAY_RE.test(req.body.day || '') ? req.body.day : T.today();
+    const day = T.isDay(req.body.day) ? req.body.day : T.today();
     await analytics.rollup(day);
     return { ok: true, day };
   });
@@ -344,9 +366,8 @@ function buildApi(ctx) {
   });
   r.post('/api/me/password', (req) => {
     user(req);
-    const u = h.get('SELECT pass_hash FROM users WHERE id = ?', req.user.id);
-    if (!require('./auth').verifyPassword(req.body.current || '', u.pass_hash)) throw httpError(400, "Joriy parol noto'g'ri");
-    auth.updateUser(req.user.id, { password: req.body.password });
+    auth.checkPassword(req.user.id, req.body.current);
+    auth.updateUser(req.user.id, { password: req.body.password ?? null }); // missing: refused by the password rules
     return { ok: true, relogin: true };
   });
 
@@ -406,11 +427,16 @@ function buildApi(ctx) {
     for (const [k, fn] of Object.entries(handlers)) bus.on(k, fn);
     const ping = setInterval(() => res.write(': ping\n\n'), 25e3);
     const healthTick = setInterval(() => send('health', health()), 30e3);
-    req.on('close', () => {
+    const token = req.cookies[COOKIE];
+    const sessionTick = setInterval(() => { if (!auth.session(token)) { cleanup(); res.end(); } }, 5e3);
+    const cleanup = () => {
       clearInterval(ping);
       clearInterval(healthTick);
+      clearInterval(sessionTick);
       for (const [k, fn] of Object.entries(handlers)) bus.off(k, fn);
-    });
+    };
+    req.on('close', cleanup);
+    res.on('close', cleanup);
     return undefined;
   });
 
@@ -422,22 +448,24 @@ function httpErrorRow() { throw httpError(404, 'Topilmadi'); }
 /** Wraps the router: auth from cookie, JSON body, CSRF check, errors -> JSON. */
 function apiHandler(ctx, router) {
   const { auth, config } = ctx;
+  const hostOf = (origin) => { try { return new URL(origin).host; } catch { return null; } };
   return async (req, res, url) => {
-    req.query = Object.fromEntries(url.searchParams);
-    req.cookies = parseCookies(req.headers.cookie);
-    req.user = auth.session(req.cookies[COOKIE]);
-    const m = router.match(req.method, url.pathname);
-    if (!m) return json(res, 404, { error: 'Topilmadi' });
     try {
+      req.query = Object.fromEntries(url.searchParams);
+      req.cookies = parseCookies(req.headers.cookie);
+      req.user = auth.session(req.cookies[COOKIE]);
+      const m = router.match(req.method, url.pathname);
+      if (!m) return json(res, 404, { error: 'Topilmadi' });
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         const origin = req.headers.origin;
         const host = req.headers['x-forwarded-host'] || req.headers.host;
-        const allowed = origin && (origin === config.publicOrigin || new URL(origin).host === host);
+        const allowed = origin && (origin === config.publicOrigin || hostOf(origin) === host);
         if (origin && !allowed) throw httpError(403, "Ruxsat yo'q (origin)");
         if (!/^application\/json/.test(req.headers['content-type'] || '') && req.headers['content-length'] !== '0' && req.headers['content-length']) {
           throw httpError(415, 'JSON kutilgan');
         }
         req.body = await readJson(req);
+        if (req.body === null || typeof req.body !== 'object' || Array.isArray(req.body)) throw httpError(400, "JSON obyekt kutilgan");
       } else req.body = {};
       const out = await m.handlers[0](req, res, m.params);
       if (out !== undefined && !res.headersSent) json(res, 200, out);

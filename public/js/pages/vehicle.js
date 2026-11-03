@@ -2,7 +2,7 @@
 // the day's totals, and the last 14 days as charts.
 /* global L */
 import { get, state } from '../api.js';
-import { $, html, setHtml, icon, typeIcon, statusHtml, hm, when, dur, num, today, addDays, dayLabel, shortDay, ago, toastError, esc } from '../ui.js';
+import { $, html, setHtml, icon, typeIcon, statusHtml, hm, when, dur, num, today, isDay, addDays, dayLabel, shortDay, ago, toastError, esc } from '../ui.js';
 import { createMap } from '../map.js';
 import { barChart, responsive } from '../charts.js';
 
@@ -12,7 +12,7 @@ export default {
     if (!id || !state.vehicles.has(id)) return picker(main);
     const v0 = state.vehicles.get(id);
     setTitle(`Transport: ${v0.label}`);
-    let day = /^\d{4}-\d{2}-\d{2}$/.test(query.day || '') ? query.day : today();
+    let day = isDay(query.day) ? query.day : today();
     const vehicles = [...state.vehicles.values()].sort((a, b) => a.label.localeCompare(b.label));
 
     main.innerHTML = String(html`
@@ -73,7 +73,10 @@ export default {
         get(`/api/vehicles/${id}/events?from=${day}&to=${day}`),
         get(`/api/vehicles/${id}/days?from=${from14}&to=${day}`),
       ]).catch((e) => { toastError(e); return [null, null, null]; });
-      if (!track) return;
+      if (!track) {
+        setHtml($('#timeline', main), html`<div class="empty">Yuklab bo'lmadi</div>`);
+        return;
+      }
       // map
       const pts = track.points.map((p) => [p[1], p[2]]);
       if (pts.length > 1) {

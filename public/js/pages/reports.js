@@ -1,7 +1,7 @@
 // Hisobotlar: per-vehicle totals for a day range (dispatchers too), totals row, CSV and print.
 // Also exports the date-range control and the per-vehicle table that the Tahlil page reuses.
 import { get, qs } from '../api.js';
-import { $, html, setHtml, icon, num, today, addDays, dayLabel, toastError, downloadCsv, sortRows, typeIcon, when } from '../ui.js';
+import { $, html, setHtml, icon, num, today, isDay, addDays, dayLabel, toastError, downloadCsv, sortRows, typeIcon, when } from '../ui.js';
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -24,7 +24,7 @@ export function presetRange(key, t = today()) {
 /** Range from the URL query (?from=&to=), or the default preset. */
 export function rangeFromQuery(query, def) {
   const { from, to } = query || {};
-  if (DAY_RE.test(from || '') && DAY_RE.test(to || '') && from <= to) return { from, to };
+  if (isDay(from) && isDay(to) && from <= to) return { from, to };
   return presetRange(def);
 }
 
