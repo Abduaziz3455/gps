@@ -181,3 +181,26 @@ test('login: "show password" works, and is off again after signing in', async ({
   await expect(page.locator('[name=password]')).toHaveAttribute('type', 'password');
   await expect(page.locator('#showPw')).not.toBeChecked();
 });
+
+test('a truck in another region: the map opens on the work area, "Hammasi" shows it too', async ({ page, signIn }) => {
+  // Bukhara, about 450 km from the yard. The stream is held back so that it can't move the truck home meanwhile.
+  await page.route(/\/api\/stream/, () => {});
+  await page.route(/\/api\/vehicles$/, async (route) => {
+    const res = await route.fetch();
+    const list = await res.json();
+    Object.assign(list[0], { lat: 39.77, lng: 64.42, label: 'FAR AWAY', status: 'stopped' });
+    await route.fulfill({ response: res, json: list });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await signIn('owner');
+  const far = page.locator('.vm[title="FAR AWAY"]');
+  await expect(far).toBeAttached();
+  const onMap = () => far.evaluate((vm) => {
+    const a = vm.getBoundingClientRect(), b = vm.closest('.map').getBoundingClientRect();
+    return a.left >= b.left && a.right <= b.right && a.top >= b.top && a.bottom <= b.bottom;
+  });
+  expect(await onMap()).toBe(false);
+  await expect(page.locator('.yard-label')).toBeInViewport();
+  await page.click('#fitBtn');
+  await expect.poll(onMap).toBe(true);
+});

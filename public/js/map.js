@@ -14,6 +14,7 @@ export const isDark = () => {
   return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
 };
 
+const WORK_AREA_M = 120_000; // trucks further from the yard than this don't set the opening view
 const NEAR_ZOOM = 16; // from here parked trucks are far enough apart to show their labels
 const YARD_MIN_RADIUS_PX = 24; // the marker keeps the yard this big on screen; 150 m is about 5 px at city zoom
 
@@ -169,10 +170,22 @@ export class VehicleLayer {
     this.sync([prev, id].filter((x) => x != null));
   }
 
+  /** Every truck, wherever it is, and the yard. */
   fit(padding = 48, animate = true) {
-    const pts = [...this.markers.values()].map((m) => m.getLatLng());
+    this._fitTo([...this.markers.values()].map((m) => m.getLatLng()), padding, animate);
+  }
+
+  /** The opening view: the yard and the trucks around it. One truck in another region would shrink everything else to a dot. */
+  fitWork(padding = 48, animate = false) {
     const yard = state.me?.yard;
-    if (pts.length && yard) pts.push(L.latLng(yard.lat, yard.lng));
+    const all = [...this.markers.values()].map((m) => m.getLatLng());
+    const near = yard ? all.filter((p) => this.map.distance(p, [yard.lat, yard.lng]) <= WORK_AREA_M) : all;
+    this._fitTo(near.length ? near : all, padding, animate);
+  }
+
+  _fitTo(points, padding, animate) {
+    const yard = state.me?.yard;
+    const pts = yard && points.length ? [...points, L.latLng(yard.lat, yard.lng)] : points;
     if (pts.length) this.map.fitBounds(L.latLngBounds(pts), { padding: [padding, padding], maxZoom: 15, animate });
   }
 

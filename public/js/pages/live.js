@@ -40,7 +40,7 @@ export default {
     const layer = new VehicleLayer(map, { onClick: (id) => select(id, false), filter: (v) => !filter || v.status === filter });
     layer.sync();
     let fitted = false;
-    if (!selected && layer.markers.size) { layer.fit(undefined, false); fitted = true; }
+    if (!selected && layer.markers.size) { layer.fitWork(); fitted = true; }
 
     const list = $('#vlist', main);
     const chips = $('#fchips', main);
@@ -168,7 +168,7 @@ export default {
     const refreshRows = debounce(() => { renderChips(); renderList(); if (selected) renderDrawer(); }, 300);
     const off = state.on('vehicles:changed', (ids) => {
       layer.sync(ids || null);
-      if (!fitted && layer.markers.size) { layer.fit(undefined, false); fitted = true; }
+      if (!fitted && layer.markers.size) { layer.fitWork(); fitted = true; }
       if (follow && selected && (!ids || ids.includes(selected))) {
         const v = state.vehicles.get(selected);
         if (v?.lat != null) map.panTo([v.lat, v.lng], { animate: true });
