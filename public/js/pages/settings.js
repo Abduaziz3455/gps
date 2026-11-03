@@ -132,10 +132,13 @@ async function renderPush(panel) {
   let prefs = { ...DEFAULT_PREFS };
   let busy = false;
 
-  if (supported) {
+  // Without permission there can be no subscription, so there's nothing to ask the browser's push service.
+  if (supported && Notification.permission === 'granted') {
     try {
-      const reg = await navigator.serviceWorker.getRegistration();
-      sub = reg ? await reg.pushManager.getSubscription() : null;
+      // Some browsers never answer these (seen in WebKit): the rest of the page must not wait for them.
+      const within = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), 3000))]);
+      const reg = await within(navigator.serviceWorker.getRegistration());
+      sub = reg ? await within(reg.pushManager.getSubscription()) : null;
       if (sub) {
         const st = await post('/api/push/status', { endpoint: sub.endpoint });
         if (st.endpoint) { known = true; prefs = { ...DEFAULT_PREFS, ...st.prefs }; }
