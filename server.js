@@ -10,6 +10,7 @@ const http = require('node:http');
 loadEnv(path.join(__dirname, '.env'));
 
 const config = require('./src/config');
+const bus = require('./src/bus');
 const { open, helpers } = require('./src/db');
 const { Auth } = require('./src/auth');
 const { GpsClient } = require('./src/gps/client');
@@ -134,16 +135,18 @@ async function start() {
   if (poller) poller.start();
   analytics.start();
   if (gate) {
-    // Let the poller load the vehicle list first so plate matching works from the start.
-    setTimeout(() => gate.start()
-      .then(async (imported) => {
-        // Camera history arrived after the first rollups: recompute the camera columns of those days.
-        if (!imported) return;
+    // Camera history arrived after the first rollups: recompute the camera columns of those days.
+    bus.on('gate:history', async ({ since }) => {
+      try {
         const T = require('./src/time');
-        for (const day of T.daysBetween(T.dayOf(imported.since), T.today())) await analytics.rollup(day, { withGps: false });
+        for (const day of T.daysBetween(T.dayOf(since), T.today())) await analytics.rollup(day, { withGps: false });
         log.info('camera history: daily trip counts updated');
-      })
-      .catch((e) => log.error(`camera pipeline: ${e.stack || e.message}`)), poller ? 4000 : 0);
+      } catch (e) {
+        log.error(`camera history rollup: ${e.stack || e.message}`);
+      }
+    });
+    // Let the poller load the vehicle list first so plate matching works from the start.
+    setTimeout(() => gate.start().catch((e) => log.error(`camera pipeline: ${e.stack || e.message}`)), poller ? 4000 : 0);
   }
 
   const shutdown = (sig) => {

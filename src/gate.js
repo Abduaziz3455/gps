@@ -26,6 +26,7 @@ try { sharp = require('sharp'); } catch { /* optional: photos are stored full si
 const LEARN_HITS = 3;
 const FRESH_MS = 2 * 60e3; // the overview snapshot only shows the vehicle for a minute or two
 const NOTIFY_MAX_AGE_MS = 15 * 60e3; // older (catch-up after downtime) events are recorded, not pushed
+const HISTORY_DONE = 'camera_history_done'; // kv: when the first-run camera import succeeded
 
 class Gate {
   constructor({ h, nvr, poller, config, cameras, tracker, plates, log = console }) {
@@ -119,6 +120,8 @@ class Gate {
     }
     this.searchOk = ok;
     if (ok) this.lastError = null;
+    // History goes in oldest first across cameras, so a partial answer waits for the retry.
+    if (mode === 'history' && !ok) return 0;
     caps.sort((a, b) => a.time - b.time);
     let n = 0;
     for (const cap of caps) {
@@ -307,13 +310,10 @@ class Gate {
     const channels = [...this.cameras.keys()];
     const last = this.tracker.lastSightingTime();
     const now = Date.now();
-    let imported = null;
-    if (last == null && this.ncfg.backfillDays > 0) {
-      const since = now - this.ncfg.backfillDays * 86400e3;
-      this.log.info?.(`camera history: importing ${this.ncfg.backfillDays} days`);
-      const n = await this.sync(channels, since, 'history').catch((e) => { this.log.warn?.(`history import failed: ${e.message}`); return 0; });
-      this.log.info?.(`camera history: ${n} captures`);
-      imported = { since, captures: n };
+    // Sightings without the mark: a database from before the mark existed, its import already ran.
+    this.historyPending = last == null && this.ncfg.backfillDays > 0 && !this.h.kvGet(HISTORY_DONE);
+    if (this.historyPending) {
+      await this.importHistory(channels);
     } else if (last != null) {
       const since = Math.max(last, now - this.ncfg.catchupHours * 3600e3) - 5 * 60e3;
       const n = await this.sync(channels, since, 'live').catch(() => 0);
@@ -322,9 +322,14 @@ class Gate {
     this.pollFrom = Date.now();
     this._listen();
     const poll = async () => {
-      const from = Math.max(this.pollFrom, Date.now() - this.ncfg.catchupHours * 3600e3) - 5 * 60e3;
-      await this.sync(channels, from, 'live').catch(() => {});
-      if (this.searchOk) this.pollFrom = Date.now();
+      if (this.abort.signal.aborted) return;
+      if (this.historyPending) {
+        await this.importHistory(channels);
+      } else {
+        const from = Math.max(this.pollFrom, Date.now() - this.ncfg.catchupHours * 3600e3) - 5 * 60e3;
+        await this.sync(channels, from, 'live').catch(() => {});
+        if (this.searchOk) this.pollFrom = Date.now();
+      }
       this.timers[0] = setTimeout(poll, this.ncfg.pollSeconds * 1000);
     };
     this.timers[0] = setTimeout(poll, this.ncfg.pollSeconds * 1000);
@@ -332,7 +337,27 @@ class Gate {
     resolveLoop();
     const cleanup = () => { this.cleanupPhotos(); this.timers[2] = setTimeout(cleanup, 6 * 3600e3); };
     this.timers[2] = setTimeout(cleanup, 60e3);
-    return imported;
+  }
+
+  /**
+   * The first-run import. Done only once every camera has answered: if the NVR is down it stays pending and each
+   * poll tries again. Until then live captures wait, so the import can't arrive after, and out of order with, them.
+   */
+  async importHistory(channels) {
+    const since = Date.now() - this.ncfg.backfillDays * 86400e3;
+    if (!this.historyAnnounced) this.log.info?.(`camera history: importing ${this.ncfg.backfillDays} days`);
+    this.historyAnnounced = true;
+    const n = await this.sync(channels, since, 'history').catch((e) => {
+      this.searchOk = false;
+      this.log.warn?.(`history import failed: ${e.message}`);
+      return 0;
+    });
+    if (!this.searchOk) return;
+    this.historyPending = false;
+    this.h.kvSet(HISTORY_DONE, Date.now());
+    this.pollFrom = Date.now();
+    this.log.info?.(`camera history: ${n} captures`);
+    bus.emit('gate:history', { since, captures: n });
   }
 
   _listen() {
@@ -340,7 +365,7 @@ class Gate {
       while (!this.abort.signal.aborted) {
         try {
           await this.nvr.anprEvents((ch) => {
-            if (!this.cameras.has(ch)) return;
+            if (!this.cameras.has(ch) || this.historyPending) return; // the import will include this capture
             // The record lands on the NVR a few seconds after the event: retry briefly.
             (async () => {
               for (let i = 0; i < 5; i++) {

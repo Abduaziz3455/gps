@@ -142,3 +142,98 @@ test('outside vehicle entry: status outside, no GPS wait', async () => {
 });
 
 void DatabaseSync;
+
+// --- first-run camera import ------------------------------------------------------------------
+
+function importRig(t, { db = open(':memory:'), pollSeconds = 0.01, backfillDays = 30 } = {}) {
+  const h = helpers(db);
+  if (!h.get('SELECT 1 FROM vehicles WHERE id = 1')) h.run('INSERT INTO vehicles (id, name, updated_at) VALUES (1, ?, ?)', '85 450 KBA', Date.now());
+  const down = new Set(CAMS.map((c) => c.channel)); // cameras that fail; all of them until back()
+  const searches = [];
+  const nvr = {
+    searchCaptures: async (ch, since) => {
+      searches.push({ ch, since });
+      if (down.has(ch)) throw new Error('connect EHOSTUNREACH');
+      return [{ channel: ch, time: Date.now() - 86400e3, plate: '85450KBA', name: `ch0${ch}_history`, uriPath: '' }];
+    },
+    captureImage: async () => Buffer.alloc(0),
+    anprEvents: (fn, { signal }) => new Promise((resolve) => { nvr.fire = fn; signal.addEventListener('abort', resolve); }),
+  };
+  const config = {
+    dataDir: '/nonexistent',
+    nvr: { cameras: CAMS, resolveAfterSec: 90, exitConfirmMin: 5, matchBeforeSec: 45, matchAfterSec: 90, pollSeconds, catchupHours: 6, backfillDays, keepPhotosDays: 0 },
+  };
+  let gate;
+  const tracker = new Tracker(db, { fleetPlates: () => gate.fleetPlates() });
+  gate = new Gate({ h, nvr, poller: { live: new Map(), openVisit: new Map() }, config, tracker, plates, log: {} });
+  t.after(() => gate.stop()); // also when an assertion fails: a running poll would keep the test process alive
+  const sightings = () => h.get('SELECT COUNT(*) n FROM cam_sightings').n;
+  return { db, h, nvr, gate, down, searches, sightings, done: () => h.kvGet('camera_history_done') };
+}
+const until = async (cond) => {
+  for (let i = 0; i < 400 && !cond(); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(cond(), 'condition not met in time');
+};
+const THIRTY_DAYS_AGO = () => Date.now() - 29 * 86400e3;
+
+test('camera history: NVR down on the first start, imported when it comes back, only once', async (t) => {
+  const r = importRig(t);
+  const imported = [];
+  const on = (x) => imported.push(x);
+  bus.on('gate:history', on);
+  t.after(() => bus.off('gate:history', on));
+  await r.gate.start();
+  await until(() => r.searches.length > 4); // retried by the polls
+  assert.equal(r.done(), null);
+  assert.equal(r.sightings(), 0);
+  assert.equal(imported.length, 0);
+
+  r.down.clear();
+  await until(() => r.done());
+  assert.equal(r.sightings(), 2);
+  assert.equal(imported.length, 1);
+  assert.deepEqual(r.h.all('SELECT DISTINCT status FROM gate_events').map((x) => x.status), ['history']);
+  r.gate.stop();
+
+  // After a restart: no second import, whatever the outcome of the first.
+  const again = importRig(t, { db: r.db, pollSeconds: 60 });
+  again.down.clear();
+  await again.gate.start();
+  assert.ok(again.searches.every((s) => s.since > THIRTY_DAYS_AGO()), 'the import ran again');
+});
+
+test('camera history: one camera failing records nothing, so the retry stays in time order', async (t) => {
+  const r = importRig(t);
+  r.down.delete(4);
+  await r.gate.start();
+  await until(() => r.searches.length > 4);
+  assert.equal(r.done(), null);
+  assert.equal(r.sightings(), 0);
+  r.down.clear();
+  await until(() => r.done());
+  assert.equal(r.sightings(), 2);
+});
+
+test('camera history: an empty answer counts as done; a database from before the mark is not imported again', async (t) => {
+  const empty = importRig(t, { pollSeconds: 60 });
+  empty.down.clear();
+  empty.nvr.searchCaptures = async () => [];
+  await empty.gate.start();
+  assert.ok(empty.done());
+
+  const old = importRig(t, { pollSeconds: 60 });
+  old.down.clear();
+  old.h.run("INSERT INTO cam_sightings (name, channel, camera, time, plate) VALUES ('ch04_old', 4, 'ANPR-1', ?, '85450KBA')", Date.now() - 3600e3);
+  await old.gate.start();
+  assert.ok(old.searches.length > 0 && old.searches.every((s) => s.since > THIRTY_DAYS_AGO()), 'the import ran on an old database');
+});
+
+test('camera history: a live camera event waits while the import is pending', async (t) => {
+  const r = importRig(t, { pollSeconds: 60 });
+  await r.gate.start();
+  await until(() => r.nvr.fire);
+  const before = r.searches.length;
+  r.nvr.fire(4);
+  await new Promise((res) => setTimeout(res, 2200)); // a live sync would start 2 s after the event
+  assert.equal(r.searches.length, before);
+});
