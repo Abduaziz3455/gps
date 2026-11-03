@@ -428,11 +428,13 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .is-loading { opacity: .55; transition: opacity .15s; pointer-events: none; }
 .span-all { grid-column: 1 / -1; }
 .an-body { display: grid; gap: 16px; min-width: 0; }
+.set-panel, .set-host { min-width: 0; }
 .vtable td, .vtable th { white-space: nowrap; }
 .vtable tbody tr:focus-visible { outline-offset: -2px; }
 .veh-edit td { vertical-align: top; }
 .veh-edit tr.inactive td:first-child { opacity: .6; }
 .veh-edit input, .veh-edit select { height: 32px; }
+.veh-edit .switch { display: inline-block; margin-top: 4px; }
 .print-only { display: none; }
 .alist { display: grid; }
 .arow { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 4px 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); align-items: start; }
