@@ -39,6 +39,7 @@ export default {
         b.setAttribute('aria-selected', String(on));
         b.tabIndex = on ? 0 : -1;
         if (on && focus) b.focus();
+        if (on) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       }
       panel.setAttribute('aria-labelledby', `tab-${t.id}`);
       replaceQuery('sozlamalar', { tab: t.id === tabs[0].id ? '' : t.id });

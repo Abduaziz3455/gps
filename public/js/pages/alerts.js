@@ -45,6 +45,8 @@ export default {
     let list = [];
     let alive = true;
     let seq = 0;
+    let scrolled = false;
+    let first = true; // the ?id= fallback to "Hammasi" applies to the first load only
 
     setHtml(main, html`<div class="page">
       <div class="page-head">
@@ -83,7 +85,10 @@ export default {
         const row = listEl.querySelector(`[data-id="${focusId}"]`);
         if (row) {
           row.classList.add('focus');
-          requestAnimationFrame(() => { row.scrollIntoView({ block: 'center' }); row.focus({ preventScroll: true }); });
+          if (!scrolled) {
+            scrolled = true;
+            requestAnimationFrame(() => { row.scrollIntoView({ block: 'center' }); row.focus({ preventScroll: true }); });
+          }
         }
       }
     };
@@ -96,11 +101,12 @@ export default {
       try {
         let rows = await get(`/api/alerts?${qs({ state: filter.state === 'open' ? 'open' : '', type: filter.type, limit: 300 })}`);
         // A linked alert that is already acknowledged is not in the open list: show all instead.
-        if (focusId && filter.state === 'open' && !rows.some((a) => a.id === focusId)) {
+        if (first && focusId && filter.state === 'open' && !rows.some((a) => a.id === focusId)) {
           const all = await get(`/api/alerts?${qs({ type: filter.type, limit: 300 })}`);
           if (all.some((a) => a.id === focusId)) { filter.state = 'all'; rows = all; syncControls(); syncUrl(); }
         }
         if (!alive || my !== seq) return;
+        first = false;
         list = rows;
         renderList();
       } catch (e) {

@@ -194,7 +194,7 @@ class Analytics {
     const vehiclesTotal = this.h.get('SELECT COUNT(*) n FROM vehicles WHERE active = 1 AND in_gps = 1').n;
     const days = T.daysBetween(from, to).length;
     const ta = this.h.get(`SELECT SUM(turnaround_s * trips_out) w, SUM(CASE WHEN turnaround_s IS NOT NULL THEN trips_out END) n
-      FROM daily_stats WHERE day BETWEEN ? AND ?`, from, to);
+      FROM daily_stats d JOIN vehicles v ON v.id = d.vehicle_id AND v.active = 1 WHERE day BETWEEN ? AND ?`, from, to);
     const start = T.dayStart(from), end = T.dayStart(to) + T.DAY;
     const stay = this.h.get(`SELECT AVG(stay_s) a, COUNT(*) n FROM gate_events WHERE direction = 'out' AND vehicle_id IS NOT NULL
       AND status IN ${COUNTED} AND stay_s IS NOT NULL AND t >= ? AND t < ?`, start, end);
@@ -240,7 +240,8 @@ class Analytics {
     const rows = this.h.all(`SELECT v.*, COALESCE(SUM(km),0) km, COALESCE(SUM(MAX(trips_out, trips_in)),0) trips, COALESCE(SUM(engine_s),0) engine_s,
       COALESCE(SUM(idle_s),0) idle_s, SUM(fuel_used) fuel_used, COALESCE(SUM(refuel_l),0) refuel_l, COALESCE(SUM(drain_l),0) drain_l,
       MAX(max_speed) max_speed, SUM(turnaround_s * trips_out) ta_w, SUM(CASE WHEN turnaround_s IS NOT NULL THEN trips_out END) ta_n,
-      SUM(yard_s) yard_s, COUNT(CASE WHEN MAX(trips_out, trips_in) > 0 OR km >= 5 THEN 1 END) active_days, MAX(odometer) odometer
+      SUM(yard_s) yard_s, COUNT(CASE WHEN MAX(trips_out, trips_in) > 0 OR km >= 5 THEN 1 END) active_days, MAX(odometer) odometer,
+      SUM(CASE WHEN fuel_used IS NOT NULL THEN km END) km_fuel
       FROM vehicles v LEFT JOIN daily_stats d ON d.vehicle_id = v.id AND d.day BETWEEN ? AND ?
       WHERE v.active = 1 GROUP BY v.id ORDER BY trips DESC, km DESC`, from, to);
     const days = T.daysBetween(from, to).length;
@@ -248,7 +249,7 @@ class Analytics {
       id: r.id, label: vehicleLabel(r), gpsName: r.name, type: r.type,
       km: r1(r.km), trips: r.trips, engineHours: r1(r.engine_s / 3600),
       idleShare: r.engine_s ? Math.round((r.idle_s / r.engine_s) * 100) : null,
-      fuelUsed: r1(r.fuel_used), fuelPer100: r.fuel_used && r.km ? r1((r.fuel_used / r.km) * 100) : null, fuelNorm: r.fuel_norm,
+      fuelUsed: r1(r.fuel_used), fuelPer100: r.fuel_used && r.km_fuel ? r1((r.fuel_used / r.km_fuel) * 100) : null, fuelNorm: r.fuel_norm,
       refuelL: r1(r.refuel_l), drainL: r1(r.drain_l), maxSpeed: r1(r.max_speed),
       turnaroundMin: r.ta_n ? Math.round(r.ta_w / r.ta_n / 60) : null,
       yardHours: r1((r.yard_s || 0) / 3600), activeDays: r.active_days, days, odometer: r1(r.odometer),
@@ -267,7 +268,7 @@ class Analytics {
   /** Turnaround (exit -> next entry) distribution, in 30-minute buckets up to 6 h. */
   turnaround(from, to) {
     const start = T.dayStart(from), end = T.dayStart(to) + T.DAY;
-    const outs = this.h.all(`SELECT vehicle_id, t FROM gate_events WHERE direction = 'out' AND vehicle_id IS NOT NULL
+    const outs = this.h.all(`SELECT vehicle_id, t FROM gate_events WHERE direction = 'out' AND vehicle_id IN (SELECT id FROM vehicles WHERE active = 1)
       AND status IN ${COUNTED} AND t >= ? AND t < ?`, start, end);
     const buckets = Array(13).fill(0); // 0-30, ..., 330-360, >360
     for (const e of outs) {

@@ -72,7 +72,7 @@ function buildApi(ctx) {
     if ('active' in b) h.run('UPDATE vehicles SET active = ? WHERE id = ?', b.active ? 1 : 0, id);
     bus.emit('vehicles');
     const v = h.get('SELECT * FROM vehicles WHERE id = ?', id);
-    return { ...liveView(v, poller?.live.get(id)), fuelNorm: v.fuel_norm, display: v.display };
+    return { ...liveView(v, poller?.live.get(id)), rawType: v.type, fuelNorm: v.fuel_norm, display: v.display };
   });
 
   r.get('/api/vehicles/all', (req) => {

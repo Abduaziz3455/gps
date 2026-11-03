@@ -64,7 +64,7 @@ class Auth {
     const u = this.h.get('SELECT * FROM users WHERE id = ?', id);
     if (!u) throw httpError(404, 'Foydalanuvchi topilmadi');
     if (role !== undefined && !ROLES.includes(role)) throw httpError(400, "Noto'g'ri rol");
-    const demotingOwner = u.role === 'owner' && ((role && role !== 'owner') || disabled);
+    const demotingOwner = u.role === 'owner' && !u.disabled && ((role && role !== 'owner') || disabled);
     if (demotingOwner && this.h.get("SELECT COUNT(*) n FROM users WHERE role = 'owner' AND disabled = 0").n <= 1) {
       throw httpError(400, "Kamida bitta faol rahbar (owner) qolishi kerak");
     }
@@ -88,7 +88,7 @@ class Auth {
     if (actor.id === id) throw httpError(400, "O'zingizni o'chira olmaysiz");
     const u = this.h.get('SELECT * FROM users WHERE id = ?', id);
     if (!u) throw httpError(404, 'Foydalanuvchi topilmadi');
-    if (u.role === 'owner' && this.h.get("SELECT COUNT(*) n FROM users WHERE role = 'owner' AND disabled = 0").n <= 1) {
+    if (u.role === 'owner' && !u.disabled && this.h.get("SELECT COUNT(*) n FROM users WHERE role = 'owner' AND disabled = 0").n <= 1) {
       throw httpError(400, "Kamida bitta faol rahbar (owner) qolishi kerak");
     }
     this.h.run('DELETE FROM users WHERE id = ?', id);
