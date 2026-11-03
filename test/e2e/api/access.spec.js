@@ -10,6 +10,7 @@ const V = FLEET.fuel;
 // [method, route as written in api.js, concrete path, access]
 const ROUTES = [
   ['GET', '/api/vehicles', '/api/vehicles', 'user'],
+  ['GET', '/api/tiles/:z/:x/:y', '/api/tiles/1/0/0', 'user'],
   ['PATCH', '/api/vehicles/:id', `/api/vehicles/${V}`, 'owner'],
   ['GET', '/api/vehicles/all', '/api/vehicles/all', 'owner'],
   ['GET', '/api/vehicles/:id/track', `/api/vehicles/${V}/track`, 'user'],

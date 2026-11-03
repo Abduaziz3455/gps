@@ -18,6 +18,13 @@ test.describe('live map', () => {
     await expect(page.locator('.leaflet-tile-pane img').first()).toBeVisible();
   });
 
+  test('map tiles come from our own server, so no browser setting can get them blocked', async ({ page, signIn, server }) => {
+    const tile = page.waitForRequest(/\/api\/tiles\/\d+\/\d+\/\d+$/);
+    await signIn('dispatcher');
+    expect(new URL((await tile).url()).origin).toBe(server.url);
+    // Anything else outside would fail the test: see externalRequests in support/fixtures.js
+  });
+
   test('the yard is drawn and labelled', async ({ page, signIn, server }) => {
     await signIn('owner');
     await expect(page.locator('.vm-label', { hasText: 'TBB hovli' })).toHaveCount(1);

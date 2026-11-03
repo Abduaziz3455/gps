@@ -8,6 +8,7 @@ const bus = require('./bus');
 const T = require('./time');
 const { Router, parseCookies, readJson, json, clientIp } = require('./http');
 const { COOKIE, httpError } = require('./auth');
+const { serveTile } = require('./tiles');
 const { vehicleLabel, vehicleType, prettyPlate, plateKey } = require('./gps/normalize');
 const { view: gateView } = require('./gate');
 
@@ -56,6 +57,8 @@ function buildApi(ctx) {
   };
 
   r.get('/api/vehicles', (req) => { user(req); return vehiclesLive(); });
+
+  r.get('/api/tiles/:z/:x/:y', (req, res, p) => { user(req); return serveTile(req, res, p, ctx); });
 
   r.patch('/api/vehicles/:id', async (req, res, p) => {
     owner(req);

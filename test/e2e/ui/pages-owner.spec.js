@@ -687,7 +687,7 @@ test.describe('settings: notifications on this device', () => {
     const ctx = await browser.newContext({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1' });
     const page = await ctx.newPage();
     await page.addInitScript(() => { delete window.PushManager; });
-    await page.route(/tile\.openstreetmap\.org/, (r) => r.abort());
+    await page.route(/\/api\/tiles\//, (r) => r.abort());
     await page.goto(`${server.url}/#/sozlamalar`);
     await page.fill('[name=username]', 'dispatcher');
     await page.fill('[name=password]', 'dispatcher123');

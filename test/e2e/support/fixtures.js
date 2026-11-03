@@ -41,16 +41,16 @@ const test = base.test.extend({
 });
 
 const isLocal = (u) => u.hostname === '127.0.0.1' || u.hostname === 'localhost';
-const isTile = (u) => /\.tile\.openstreetmap\.org$/.test(u.hostname);
+const isTile = (u) => u.pathname.startsWith('/api/tiles/');
 
 /** The browser side, usable with any server fixture (real.spec.js and the resilience specs bring their own). */
 const browserFixtures = {
   externalRequests: [async ({ context }, use, testInfo) => {
     const blocked = [];
     const tile = fs.readFileSync(path.join(process.env.E2E_TMP, 'tile.png'));
+    await context.route(isTile, (route) => route.fulfill({ status: 200, contentType: 'image/png', body: tile }));
     await context.route((u) => !isLocal(u) && !['data:', 'blob:'].includes(u.protocol), (route) => {
       const u = new URL(route.request().url());
-      if (isTile(u)) return route.fulfill({ status: 200, contentType: 'image/png', body: tile });
       blocked.push(u.href);
       return route.abort();
     });

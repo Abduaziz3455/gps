@@ -14,7 +14,7 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://*.tile.openstreetmap.org",
+  "img-src 'self' data: blob:",
   "connect-src 'self'",
   "worker-src 'self'",
   "manifest-src 'self'",

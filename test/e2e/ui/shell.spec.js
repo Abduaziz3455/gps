@@ -206,7 +206,7 @@ test.describe('header', () => {
   test('the clock shows Tashkent time, whatever the device\'s zone', async ({ browser, server }) => {
     const ctx = await browser.newContext({ timezoneId: 'America/New_York' });
     const page = await ctx.newPage();
-    await page.route(/tile\.openstreetmap\.org/, (r) => r.abort());
+    await page.route(/\/api\/tiles\//, (r) => r.abort());
     await page.goto(server.url);
     await page.fill('[name=username]', 'owner');
     await page.fill('[name=password]', 'owner12345');

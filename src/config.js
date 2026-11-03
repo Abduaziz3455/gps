@@ -75,6 +75,8 @@ const config = {
     keepPhotosDays: num(env.KEEP_PHOTOS_DAYS, 90),
   },
 
+  tiles: { url: env.TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' },
+
   push: {
     subject: env.VAPID_SUBJECT || 'mailto:admin@tbb-gps.uz',
   },

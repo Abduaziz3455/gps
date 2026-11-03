@@ -5,7 +5,9 @@ import { esc } from './ui.js';
 
 // OpenStreetMap tiles in both themes; the dark theme darkens them with a CSS filter (.map-dark), since the
 // free dark tile services now require API keys.
-const TILES = { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attr: '&copy; OpenStreetMap', sub: 'abc', max: 19 };
+// Tiles come through our own server (src/tiles.js): OpenStreetMap blocks browser requests without a Referer, and
+// browsers, extensions and privacy settings can all strip it.
+const TILES = { url: '/api/tiles/{z}/{x}/{y}', attr: '&copy; OpenStreetMap', max: 19 };
 
 export const isDark = () => {
   const t = document.documentElement.dataset.theme;
@@ -17,7 +19,7 @@ export function createMap(node, { center, zoom = 12 } = {}) {
   const yard = state.me?.yard;
   const map = L.map(node, { zoomControl: true, attributionControl: true, preferCanvas: false })
     .setView(center || (yard ? [yard.lat, yard.lng] : [41.31, 69.28]), zoom);
-  L.tileLayer(TILES.url, { attribution: TILES.attr, subdomains: TILES.sub, maxZoom: TILES.max }).addTo(map);
+  L.tileLayer(TILES.url, { attribution: TILES.attr, maxZoom: TILES.max }).addTo(map);
   const setTiles = () => node.classList.toggle('map-dark', isDark());
   setTiles();
   if (yard) {
