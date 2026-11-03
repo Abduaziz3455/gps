@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0f1720" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
@@ -19,19 +19,52 @@
   <div id="boot" class="boot"><div class="spinner" aria-hidden="true"></div><span>Yuklanmoqda…</span></div>
 
   <section id="login" class="login" hidden>
-    <form id="loginForm" class="login-card" autocomplete="on">
-      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span><span>TBB <b>Dispatcher</b></span></div>
-      <p class="muted">Avtopark nazorati: jonli xarita, darvoza kameralari va tahlil.</p>
-      <label class="field"><span>Login</span><input name="username" autocomplete="username" required autofocus /></label>
-      <label class="field"><span>Parol</span><input name="password" type="password" autocomplete="current-password" required /></label>
-      <p id="loginError" class="form-error" role="alert" hidden></p>
-      <button class="btn btn-primary btn-block" type="submit">Kirish</button>
-    </form>
+    <aside class="login-hero">
+      <svg class="login-art" viewBox="0 0 800 900" preserveAspectRatio="xMaxYMin slice" aria-hidden="true">
+        <g class="art-roads">
+          <path d="M-20 170 300 120 560 210 830 150"/><path d="M-20 420 240 380 470 470 830 410"/><path d="M180 -20 240 380 210 640"/>
+          <path d="M470 -20 560 210 470 470 520 700"/><path d="M700 -20 660 180 720 420 690 700"/><path d="M-20 620 210 640 520 700 830 650"/>
+          <path class="wide" d="M-20 300 330 250 620 330 830 280"/><path class="wide" d="M360 -20 330 250 370 560 340 760"/>
+        </g>
+        <g transform="translate(40 60)">
+        <path class="art-route" d="M250 165 330 250 462 205 560 210 640 320 720 300"/>
+        <circle class="art-yard" cx="250" cy="165" r="44"/><circle class="art-yard-core" cx="250" cy="165" r="5"/>
+        <g class="art-truck moving"><circle class="art-pulse" cx="462" cy="205" r="26"/><circle cx="462" cy="205" r="15"/></g>
+        <g class="art-truck moving"><circle class="art-pulse" cx="640" cy="320" r="26"/><circle cx="640" cy="320" r="15"/></g>
+        <g class="art-truck idle"><circle cx="330" cy="252" r="12"/></g>
+        <g class="art-truck parked"><circle cx="232" cy="150" r="7"/><circle cx="262" cy="178" r="7"/><circle cx="268" cy="146" r="7"/></g>
+        </g>
+      </svg>
+      <div class="brand brand-xl"><img class="brand-mark" src="/icons/icon.svg" alt="" width="44" height="44" /><span>TBB <b>Dispatcher</b></span></div>
+      <div class="login-pitch">
+        <h1>Butun avtopark bir ekranda</h1>
+        <ul>
+          <li><b>Jonli xarita.</b> Har bir mashina qayerda va nima qilyapti</li>
+          <li><b>Darvoza kameralari.</b> Kim kirdi, kim chiqdi, rasmi bilan</li>
+          <li><b>Tahlil.</b> Reyslar, masofa va yoqilg'i bir joyda</li>
+        </ul>
+      </div>
+    </aside>
+    <div class="login-pane">
+      <form id="loginForm" class="login-card" autocomplete="on">
+        <div class="brand brand-lg login-card-brand"><img class="brand-mark" src="/icons/icon.svg" alt="" width="40" height="40" /><span>TBB <b>Dispatcher</b></span></div>
+        <div class="login-head">
+          <h2>Tizimga kirish</h2>
+          <p class="muted">Login va parolingizni kiriting</p>
+        </div>
+        <label class="field"><span>Login</span><input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus /></label>
+        <label class="field"><span>Parol</span><input name="password" type="password" autocomplete="current-password" required /></label>
+        <label class="check small"><input type="checkbox" id="showPw" /> Parolni ko'rsatish</label>
+        <p id="loginError" class="form-error" role="alert" hidden></p>
+        <button class="btn btn-primary btn-block login-submit" type="submit">Kirish</button>
+        <p class="muted small login-help">Hisobingiz yo'qmi? Rahbaringizga murojaat qiling.</p>
+      </form>
+    </div>
   </section>
 
   <div id="app" class="app" hidden>
     <aside class="sidebar" aria-label="Asosiy menyu">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="brand-text">TBB <b>Dispatcher</b></span></div>
+      <div class="brand"><img class="brand-mark" src="/icons/icon.svg" alt="" width="30" height="30" /><span class="brand-text">TBB <b>Dispatcher</b></span></div>
       <nav id="nav" class="nav"></nav>
       <div class="sidebar-foot">
         <div id="healthBox" class="health" title="Tizim holati"></div>

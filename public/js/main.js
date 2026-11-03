@@ -32,6 +32,8 @@ function showLogin() {
   $('#login').hidden = false;
   const form = $('#loginForm');
   form.username.focus(); // the autofocus attribute does nothing here: the form was hidden when the page loaded
+  const showPw = $('#showPw');
+  showPw.onchange = () => { form.password.type = showPw.checked ? 'text' : 'password'; };
   form.onsubmit = async (e) => {
     e.preventDefault();
     const err = $('#loginError');
@@ -42,6 +44,8 @@ function showLogin() {
       await post('/api/auth/login', { username: form.username.value.trim(), password: form.password.value });
       state.me = await get('/api/me');
       form.password.value = '';
+      form.password.type = 'password';
+      showPw.checked = false;
       $('#login').hidden = true;
       await startApp();
     } catch (ex) {
@@ -76,7 +80,7 @@ async function startApp() {
 
 function buildNav() {
   const pages = PAGES.filter((p) => !p.owner || state.isOwner);
-  const link = (p) => html`<a href="#/${p.path}" data-path="${p.path}">${icon(p.icon)}<span>${p.label}</span>${p.badge ? html`<span class="badge nav-badge" data-badge hidden>0</span>` : ''}</a>`;
+  const link = (p) => html`<a href="#/${p.path}" data-path="${p.path}" title="${p.label}">${icon(p.icon)}<span>${p.label}</span>${p.badge ? html`<span class="badge nav-badge" data-badge hidden>0</span>` : ''}</a>`;
   setHtml($('#nav'), html`${pages.map(link)}`);
   const mobile = pages.filter((p) => ['xarita', 'darvoza', 'ogohlantirish', 'tahlil', 'hisobot', 'sozlamalar'].includes(p.path)).slice(0, 5);
   setHtml($('#tabbar'), html`${mobile.map(link)}`);
@@ -191,6 +195,7 @@ function renderBanner() {
     items = (state.health?.status?.problems || []).map((p) => ({ cls: p.severity === 'critical' ? 'bad' : 'warn', title: p.title, text: p.text, since: p.since }));
   }
   el.hidden = !items.length;
+  el.onclick = () => el.classList.toggle('open'); // phones show one line of the text; a tap shows all of it
   setHtml(el, html`${items.slice(0, 3).map((i) => html`<div class="sys-item ${i.cls}">${icon('alert')}<div><b>${i.title}</b>${i.since ? html` <span class="sys-since">· ${when(i.since)} dan beri</span>` : ''}<div class="sys-text">${i.text}</div></div></div>`)}`);
 }
 

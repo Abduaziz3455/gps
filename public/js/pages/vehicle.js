@@ -19,9 +19,11 @@ export default {
       <div class="page">
         <div class="page-head">
           <select id="vSel" aria-label="Transport">${vehicles.map((v) => html`<option value="${v.id}" ${v.id === id ? 'selected' : ''}>${v.label}</option>`)}</select>
-          <button class="icon-btn" id="prevDay" title="Oldingi kun" aria-label="Oldingi kun">‹</button>
-          <input type="date" id="vDay" aria-label="Kun" />
-          <button class="icon-btn" id="nextDay" title="Keyingi kun" aria-label="Keyingi kun">›</button>
+          <div class="day-nav">
+            <button class="icon-btn" id="prevDay" title="Oldingi kun" aria-label="Oldingi kun">‹</button>
+            <input type="date" id="vDay" aria-label="Kun" />
+            <button class="icon-btn" id="nextDay" title="Keyingi kun" aria-label="Keyingi kun">›</button>
+          </div>
           <span class="spacer"></span>
           <span id="vLive"></span>
           <a class="btn btn-sm" href="#/xarita?v=${id}">${icon('map')}<span>Jonli xaritada</span></a>

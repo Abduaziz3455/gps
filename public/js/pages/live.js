@@ -40,7 +40,7 @@ export default {
     const layer = new VehicleLayer(map, { onClick: (id) => select(id, false), filter: (v) => !filter || v.status === filter });
     layer.sync();
     let fitted = false;
-    if (!selected && layer.markers.size) { layer.fit(40, false); fitted = true; }
+    if (!selected && layer.markers.size) { layer.fit(undefined, false); fitted = true; }
 
     const list = $('#vlist', main);
     const chips = $('#fchips', main);
@@ -68,7 +68,7 @@ export default {
 
     function rowHtml(v) {
       const meta = v.status === 'offline' ? `Oxirgi signal: ${ago(v.recordTime)}` : (v.inYard ? 'Hovlida' : (v.address || '').split(',').slice(0, 2).join(','));
-      return html`<button class="vrow" role="option" data-id="${v.id}" aria-selected="${selected === v.id}">
+      return html`<button class="vrow ${v.status}" role="option" data-id="${v.id}" aria-selected="${selected === v.id}">
         <span class="vicon">${typeIcon(v.type)}</span>
         <span class="vname">${v.label}</span>
         <span class="vmeta">${statusHtml(v.status)} · ${meta}</span>
@@ -90,7 +90,7 @@ export default {
       const fuel = v.today.fuelLevel != null ? html`<div><b>${num(v.today.fuelLevel)} L</b><span>Bakda</span></div>` : html`<div><b>${v.today.fuel != null ? num(v.today.fuel, 1) : '—'}</b><span>Yoqilg'i, L</span></div>`;
       setHtml(drawer, html`
         <div class="drawer-head">
-          <span class="vicon" style="width:38px;height:38px;border-radius:10px;background:var(--surface-2);display:grid;place-items:center">${typeIcon(v.type)}</span>
+          <span class="vicon" style="flex:none;width:38px;height:38px;border-radius:10px;background:var(--surface-2);display:grid;place-items:center">${typeIcon(v.type)}</span>
           <div style="flex:1;min-width:0">
             <h2>${v.label}</h2>
             <div class="small muted">${v.gpsName !== v.label ? `GPS'da: ${v.gpsName}` : v.model || ''}</div>
@@ -168,7 +168,7 @@ export default {
     const refreshRows = debounce(() => { renderChips(); renderList(); if (selected) renderDrawer(); }, 300);
     const off = state.on('vehicles:changed', (ids) => {
       layer.sync(ids || null);
-      if (!fitted && layer.markers.size) { layer.fit(40, false); fitted = true; }
+      if (!fitted && layer.markers.size) { layer.fit(undefined, false); fitted = true; }
       if (follow && selected && (!ids || ids.includes(selected))) {
         const v = state.vehicles.get(selected);
         if (v?.lat != null) map.panTo([v.lat, v.lng], { animate: true });

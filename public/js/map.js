@@ -1,7 +1,7 @@
 // Leaflet helpers: themed base map, the yard circle, vehicle markers.
 /* global L */
 import { state } from './api.js';
-import { esc } from './ui.js';
+import { esc, icon } from './ui.js';
 
 // OpenStreetMap tiles in both themes; the dark theme darkens them with a CSS filter (.map-dark), since the
 // free dark tile services now require API keys.
@@ -14,6 +14,30 @@ export const isDark = () => {
   return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
 };
 
+const NEAR_ZOOM = 16; // from here parked trucks are far enough apart to show their labels
+const YARD_MIN_RADIUS_PX = 24; // the marker keeps the yard this big on screen; 150 m is about 5 px at city zoom
+
+/** The yard's true area, plus a marker that keeps it findable, and its name over the trucks, at any zoom. */
+function drawYard(map, yard) {
+  const at = [yard.lat, yard.lng];
+  L.circle(at, { radius: yard.radiusM, className: 'yard-area', interactive: false }).addTo(map);
+  const pin = (html, zIndexOffset) => L.marker(at, { icon: L.divIcon({ className: '', iconSize: [0, 0], html }), interactive: false, keyboard: false, zIndexOffset }).addTo(map);
+  const halo = pin('<div class="yard-mark"><div class="yard-halo"></div></div>', -1000);
+  const label = pin(`<div class="yard-mark"><div class="yard-label">${icon('home')}<span>${esc(yard.name)}</span></div></div>`, 900);
+  const update = () => {
+    const centre = map.latLngToContainerPoint(at);
+    const edge = map.latLngToContainerPoint([yard.lat + yard.radiusM / 111320, yard.lng]);
+    const r = Math.abs(centre.y - edge.y);
+    halo.getElement().querySelector('.yard-halo').hidden = r >= YARD_MIN_RADIUS_PX;
+    label.getElement().querySelector('.yard-label').style.setProperty('--yard-r', `${Math.max(r, YARD_MIN_RADIUS_PX)}px`);
+  };
+  map.on('zoomend', update);
+  update();
+}
+
+/** Working trucks are drawn over parked ones; the selected one over everything. */
+const markerZ = (v, selected) => (selected ? 1000 : { moving: 500, idle: 400, stopped: 100 }[v.status] || 0);
+
 /** Map with theme-following tiles and the yard circle. Returns {map, destroy}. */
 export function createMap(node, { center, zoom = 12 } = {}) {
   const yard = state.me?.yard;
@@ -22,10 +46,10 @@ export function createMap(node, { center, zoom = 12 } = {}) {
   L.tileLayer(TILES.url, { attribution: TILES.attr, maxZoom: TILES.max }).addTo(map);
   const setTiles = () => node.classList.toggle('map-dark', isDark());
   setTiles();
-  if (yard) {
-    L.circle([yard.lat, yard.lng], { radius: yard.radiusM, color: '#2a78d6', weight: 2, dashArray: '6 6', fillOpacity: 0.08, interactive: false }).addTo(map);
-    L.marker([yard.lat, yard.lng], { icon: L.divIcon({ className: '', html: `<div class="vm-label" style="top:0;position:relative;transform:translateX(-50%)">${esc(yard.name || 'Hovli')}</div>`, iconSize: [0, 0] }), interactive: false, keyboard: false }).addTo(map);
-  }
+  if (yard) drawYard(map, yard);
+  const setZoom = () => node.classList.toggle('map-near', map.getZoom() >= NEAR_ZOOM);
+  map.on('zoomend', setZoom);
+  setZoom();
   const off = state.on('theme', setTiles);
   const mq = matchMedia('(prefers-color-scheme: dark)');
   mq.addEventListener?.('change', setTiles);
@@ -60,6 +84,14 @@ function markerHtml(v, selected) {
     <div class="vm-label">${esc(v.label)}</div></div>`;
 }
 
+const BODY_R = { moving: 18, idle: 16, stopped: 11, offline: 10 }; // radius of each marker in .vm-body, px
+
+function circleHits(c, r, box) {
+  const dx = c.x - Math.max(box.l, Math.min(c.x, box.r));
+  const dy = c.y - Math.max(box.t, Math.min(c.y, box.b));
+  return dx * dx + dy * dy < r * r;
+}
+
 /** Keeps one marker per vehicle in sync with state.vehicles. */
 export class VehicleLayer {
   constructor(map, { onClick, filter = () => true } = {}) {
@@ -68,6 +100,7 @@ export class VehicleLayer {
     this.filter = filter;
     this.markers = new Map();
     this.selected = null;
+    map.on('zoomend', () => this.declutter());
   }
 
   sync(ids = null) {
@@ -79,7 +112,7 @@ export class VehicleLayer {
       if (!show) { if (m) { m.remove(); this.markers.delete(v.id); } continue; }
       const key = `${v.status}|${Math.round(v.course / 10)}|${v.label}|${v.type}|${this.selected === v.id}`;
       if (!m) {
-        m = L.marker([v.lat, v.lng], { icon: L.divIcon({ className: '', html: markerHtml(v, this.selected === v.id), iconSize: [40, 40], iconAnchor: [20, 20] }), zIndexOffset: v.status === 'moving' ? 500 : 0, keyboard: false });
+        m = L.marker([v.lat, v.lng], { icon: L.divIcon({ className: '', html: markerHtml(v, this.selected === v.id), iconSize: [40, 40], iconAnchor: [20, 20] }), zIndexOffset: markerZ(v, this.selected === v.id), keyboard: false });
         m.on('click', () => this.onClick?.(v.id));
         m._key = key;
         m.addTo(this.map);
@@ -87,8 +120,46 @@ export class VehicleLayer {
       } else {
         animateTo(m, v.lat, v.lng);
         if (m._key !== key) { m.setIcon(L.divIcon({ className: '', html: markerHtml(v, this.selected === v.id), iconSize: [40, 40], iconAnchor: [20, 20] })); m._key = key; }
-        m.setZIndexOffset(this.selected === v.id ? 1000 : v.status === 'moving' ? 500 : 0);
+        m.setZIndexOffset(markerZ(v, this.selected === v.id));
       }
+    }
+    this.declutter();
+  }
+
+  /**
+   * Labels that would land on another label, or on a working truck, step aside; hover or tap still shows them.
+   * Working trucks choose first, so the labels that stay are the ones that matter. Works from the sizes the CSS
+   * draws: measuring every label would force a layout on each update.
+   */
+  declutter() {
+    const near = this.map.getZoom() >= NEAR_ZOOM;
+    const items = [];
+    for (const [id, m] of this.markers) {
+      const v = state.vehicles.get(id);
+      const vm = m.getElement()?.querySelector('.vm');
+      if (!v || !vm) continue;
+      const p = this.map.latLngToContainerPoint(m.getLatLng());
+      items.push({ v, vm, p, active: v.status === 'moving' || v.status === 'idle', rank: id === this.selected ? -1 : markerZ(v) * -1 });
+    }
+    items.sort((a, b) => a.rank - b.rank);
+    const placed = [];
+    const yard = state.me?.yard;
+    if (yard) {
+      const y = this.map.latLngToContainerPoint([yard.lat, yard.lng]);
+      const w = yard.name.length * 7 + 34;
+      placed.push({ l: y.x - w / 2, r: y.x + w / 2, t: y.y - YARD_MIN_RADIUS_PX - 30, b: y.y - YARD_MIN_RADIUS_PX - 3 });
+    }
+    const body = (i) => BODY_R[i.v.status] || 10;
+    for (const i of items) {
+      const top = i.active ? 20 : 12;
+      const w = i.v.label.length * 6.7 + 12;
+      const box = { l: i.p.x - w / 2, r: i.p.x + w / 2, t: i.p.y + top, b: i.p.y + top + 17 };
+      const onLabel = placed.some((o) => box.l < o.r && o.l < box.r && box.t < o.b && o.t < box.b);
+      const onTruck = items.some((o) => o !== i && (o.active || !i.active) && circleHits(o.p, body(o), box));
+      const wanted = i.active || near;
+      const show = wanted && (i.v.id === this.selected || !(onLabel || onTruck));
+      i.vm.classList.toggle('no-label', !show);
+      if (show) placed.push(box);
     }
   }
 
@@ -98,8 +169,10 @@ export class VehicleLayer {
     this.sync([prev, id].filter((x) => x != null));
   }
 
-  fit(padding = 40, animate = true) {
+  fit(padding = 48, animate = true) {
     const pts = [...this.markers.values()].map((m) => m.getLatLng());
+    const yard = state.me?.yard;
+    if (pts.length && yard) pts.push(L.latLng(yard.lat, yard.lng));
     if (pts.length) this.map.fitBounds(L.latLngBounds(pts), { padding: [padding, padding], maxZoom: 15, animate });
   }
 
