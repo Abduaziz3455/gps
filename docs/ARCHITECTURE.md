@@ -23,7 +23,7 @@ The v1 file is kept in git history (commit `7724957` matches what runs on the si
 ## 2. System overview
 
 ```
- plant                                    tbb-gps.uz (38.242.242.133)                          people
+ plant                                    tbb-gps.uz (5.182.26.55)                             people
  ┌──────────────────┐  ISAPI (digest)    ┌───────────────────────────────────────────────┐
  │ Hikvision NVR    │◄───────────────────│ camera pipeline                               │
  │  ANPR-1  entry   │  event stream,     │  NVR events + 60 s poll → plate rules →       │
@@ -219,7 +219,7 @@ When this server is completely down nobody inside it can send anything: an outsi
 
 **Action needed:** the live site has been publishing the GoGPS password in its HTML. Change the GoGPS
 password after v2 is deployed (and in the notifier's `.env`, which uses the same account). If the NVR's
-port is restricted to the notifier server's IP (planned in the notifier's TODO), also allow 38.242.242.133.
+port is restricted to the notifier server's IP (planned in the notifier's TODO), also allow 5.182.26.55.
 
 ## 9. Rollout
 

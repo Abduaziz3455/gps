@@ -1,17 +1,17 @@
 # Deploy TBB Dispatcher v2
 
-Server: Ubuntu with nginx and Docker (tbb-gps.uz, 38.242.242.133). Takes over from v1 in the same folder.
+Server: Debian with nginx and Docker (`ssh icalluz`, tbb-gps.uz, 5.182.26.55), shared with other sites. The code is in `/root/gps`.
 
 ## 1. Before you start
 
 - The NVR must be reachable from this server: `curl -s -o /dev/null -w '%{http_code}\n' http://<NVR_HOST>/ISAPI/System/deviceInfo`
-  must print `401` (= it answers and wants a password). If it times out, allow 38.242.242.133 on the site router.
-- GoGPS login and the NVR password: the same values as in the notifier's `.env` on the `icall` server.
+  must print `401` (= it answers and wants a password). If it times out, allow 5.182.26.55 on the site router.
+- GoGPS login and the NVR password: the same values as in the notifier's `.env` (`/opt/tbb_car_notifier` on this server).
 
 ## 2. Get the code
 
 ```bash
-cd /root/tbb_dispatcher
+cd /root/gps
 ```
 
 ```bash
@@ -43,7 +43,8 @@ docker compose logs -f
 
 Expect: `GPS fleet: 20 vehicles`, `camera history: importing 30 days`, then `rollup ... done` for 30 days.
 The rollups take **about 25 minutes**: GoGPS needs 45-55 s per day for its reports. The live map and gate work
-meanwhile; Tahlil and Hisobot fill in from the oldest day to the newest.
+meanwhile; Tahlil and Hisobot fill in from the oldest day to the newest. If the NVR is unreachable, the camera
+import waits and runs by itself as soon as it answers.
 
 ```bash
 curl -s http://127.0.0.1:8090/health
@@ -53,10 +54,12 @@ curl -s http://127.0.0.1:8090/health
 
 The new config adds the live-stream location (no buffering).
 
-First point the DNS of `tbb-gps.uz` to this server, then get its certificate (the config won't load without it):
+First point the DNS of `tbb-gps.uz` and `www` to this server. The config won't load without a certificate, and the
+certificate needs port 80 to answer for these names, so on a new server start with a temporary plain-HTTP site that
+serves `/.well-known/acme-challenge/` from `/var/www/certbot`, then:
 
 ```bash
-certbot certonly --nginx -d tbb-gps.uz
+certbot certonly --webroot -w /var/www/certbot -d tbb-gps.uz -d www.tbb-gps.uz
 ```
 
 ```bash
@@ -69,7 +72,7 @@ cp nginx.conf /etc/nginx/sites-available/tbb-gps.uz && ln -sf /etc/nginx/sites-a
 2. Settings → Vehicles: set each truck's type and, where GoGPS names it differently, its real plate
    (suggestions appear once the cameras have seen it).
 3. **Change the GoGPS password** (v1 published it in the page source), then update `GPS_PASSWORD` here and in the
-   notifier's `.env` on `icall`, and restart both.
+   notifier's `.env`, and restart both.
 4. Phones: open the site, add it to the Home Screen (iPhone: Share → Add to Home Screen), Settings →
    Notifications → Turn on.
 5. Remove `OWNER_PASSWORD` from `.env`.
