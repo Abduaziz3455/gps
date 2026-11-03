@@ -189,7 +189,7 @@ async function renderPush(panel) {
           <div class="setting-row"><div><div><b>Tizim holati (kameralar, internet, GPS)</b></div><div class="small muted">Kamera, NVR, zavod interneti yoki GPS ishlamay qolsa — sababi bilan; tiklanganda ham xabar keladi. Tinch soatlarda ham yuboriladi</div></div>${switchHtml('system', prefs.system, 'Tizim holati')}</div>
           <div class="setting-row" style="flex-wrap:wrap">
             <div><div><b>Tinch soatlar</b></div><div class="small muted">Bu oraliqda bildirishnoma kelmaydi (masalan, 22:00 – 07:00)</div></div>
-            <div style="display:flex;gap:6px;align-items:center">
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0">
               <input type="time" name="quietFrom" value="${prefs.quietFrom}" aria-label="Tinch soatlar boshlanishi" />
               <span class="muted">–</span>
               <input type="time" name="quietTo" value="${prefs.quietTo}" aria-label="Tinch soatlar tugashi" />

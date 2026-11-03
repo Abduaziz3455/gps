@@ -45,7 +45,7 @@ export function barChart(container, data, { height = 200, unit = '', labelEvery 
   }
   const n = data.length || 1;
   const slot = w / n;
-  const bw = Math.max(2, Math.min(36, slot - 2));
+  const bw = Math.max(2, Math.min(22, slot - 2));
   const every = labelEvery || Math.ceil(n / Math.max(1, Math.floor(w / 46)));
   data.forEach((d, i) => {
     const v = Math.max(0, d.value || 0);

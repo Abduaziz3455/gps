@@ -36,7 +36,8 @@ function layoutProblems(root = '#app') {
     const name = el.textContent.trim().slice(0, 30);
     if (getComputedStyle(el).textOverflow !== 'ellipsis') {
       const box = el.closest('.fchip, .tile, .btn, .pill, .seg button');
-      if (box) {
+      const drawn = box && (parseFloat(getComputedStyle(box).borderLeftWidth) > 0 || getComputedStyle(box).backgroundColor !== 'rgba(0, 0, 0, 0)');
+      if (drawn) {
         const x = box.getBoundingClientRect();
         if (raw.right > x.right - 2 || raw.left < x.left + 2) out.push(`"${name}" touches the edge of its box`);
       }
@@ -53,7 +54,9 @@ function layoutProblems(root = '#app') {
   return [...new Set(out)];
 }
 
-for (const [name, width, height] of SCREENS) {
+for (const [name, width, height] of SCREENS) test.describe(name, () => {
+  test.use({ hasTouch: width <= 900 }); // touch devices get larger controls, so they're tested as touch devices
+
   test(`${name} (${width}x${height}): the login page fits, and its form can be reached`, async ({ page, server }) => {
     await page.setViewportSize({ width, height });
     await page.goto(server.url);
@@ -96,7 +99,7 @@ for (const [name, width, height] of SCREENS) {
     });
     expect(hits).toEqual([]);
   });
-}
+});
 
 test('where the list sits: under the map on a phone, beside it from a tablet up', async ({ page, signIn }) => {
   await signIn('owner');
@@ -168,6 +171,20 @@ test('phone: the yard\'s name is not hidden behind the map buttons', async ({ pa
       .some((b) => y.left < b.right && b.left < y.right && y.top < b.bottom && b.top < y.bottom);
   });
   expect(hit).toBe(false);
+});
+
+test('a tile that fails once is tried again, so the map has no holes', async ({ page, signIn }) => {
+  const seen = new Set();
+  let retried = false;
+  await page.route(/\/api\/tiles\//, (route) => {
+    const url = route.request().url();
+    if (seen.has(url)) retried = true;
+    if (!seen.has(url)) { seen.add(url); return route.fulfill({ status: 502, body: '' }); }
+    return route.fallback();
+  });
+  await signIn('owner');
+  await expect.poll(() => retried, { timeout: 10_000 }).toBe(true);
+  await expect.poll(() => page.locator('.leaflet-tile-pane img').evaluateAll((a) => a.length > 0 && a.every((i) => i.complete && i.naturalWidth > 0)), { timeout: 10_000 }).toBe(true);
 });
 
 test('parked trucks show their labels once zoomed in', async ({ page, signIn }) => {

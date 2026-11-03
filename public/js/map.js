@@ -44,7 +44,14 @@ export function createMap(node, { center, zoom = 12 } = {}) {
   const yard = state.me?.yard;
   const map = L.map(node, { zoomControl: true, attributionControl: true, preferCanvas: false })
     .setView(center || (yard ? [yard.lat, yard.lng] : [41.31, 69.28]), zoom);
-  L.tileLayer(TILES.url, { attribution: TILES.attr, maxZoom: TILES.max }).addTo(map);
+  const tiles = L.tileLayer(TILES.url, { attribution: TILES.attr, maxZoom: TILES.max }).addTo(map);
+  // Leaflet never retries a failed tile: one hiccup at the tile server would leave a hole until the map moves.
+  tiles.on('tileerror', ({ tile }) => {
+    const tries = Number(tile.dataset.tries || 0);
+    if (tries >= 2) return;
+    tile.dataset.tries = tries + 1;
+    setTimeout(() => { const src = tile.src; tile.src = ''; tile.src = src; }, 1500 * (tries + 1));
+  });
   const setTiles = () => node.classList.toggle('map-dark', isDark());
   setTiles();
   if (yard) drawYard(map, yard);

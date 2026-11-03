@@ -134,6 +134,7 @@ export function vehicleTable(host, { emptyText = "Bu oraliqda ma'lumot yo'q" } =
     let cls = 'num', title = '';
     if (c.key === 'fuelPer100' && overNorm(r)) { cls += ' warn-cell'; title = `Norma: ${num(r.fuelNorm, 1)} L/100 km (+${Math.round((r.fuelPer100 / r.fuelNorm - 1) * 100)}%)`; }
     if (c.key === 'drainL' && v > 0) { cls += ' warn-cell'; title = "Yoqilg'i to'kilgan"; }
+    if (!v) cls += ' zero';
     return html`<td class="${cls}" title="${title || null}">${num(v, c.d)}</td>`;
   };
 

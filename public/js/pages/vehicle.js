@@ -54,7 +54,7 @@ export default {
       const v = state.vehicles.get(id);
       setHtml($('#vLive', main), html`${statusHtml(v.status)} <span class="muted small">${ago(v.recordTime)}</span>`);
       setHtml($('#infoCard', main), html`
-        <div class="card-head">${typeIcon(v.type)}<h2>${v.label}</h2></div>
+        <div class="card-head"><h2>Hozirgi holat</h2></div>
         <div class="card-body"><dl class="kv">
           <dt>GPS nomi</dt><dd>${v.gpsName}</dd>
           ${v.plate ? html`<dt>Raqam</dt><dd><span class="plate-chip">${v.plate}</span></dd>` : ''}

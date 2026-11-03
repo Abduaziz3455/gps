@@ -60,7 +60,7 @@ export default {
 
     setHtml(main, html`<div class="page">
       <div class="page-head">
-        <div><h2>Tahlil</h2><div class="small muted" id="anRange"></div></div>
+        <div class="small muted" id="anRange"></div>
         <span class="spacer"></span>
         <div class="seg" id="anPreset" role="group" aria-label="Davr">${PRESETS.map((k) => html`<button type="button" data-p="${k}" aria-pressed="false">${PRESET_LABELS[k]}</button>`)}</div>
       </div>
