@@ -10,7 +10,7 @@ and the same GPS account independently.
 
 | v1 | Problem | v2 |
 |---|---|---|
-| The browser logged in to GoGPS with the account's password, which `server.js` wrote into the HTML | **Anyone who opened tbbdispatcher.uz could read the GPS password** (view source). No users, no roles | The GPS password stays on the server. People log in with their own account and a role (owner / dispatcher) |
+| The browser logged in to GoGPS with the account's password, which `server.js` wrote into the HTML | **Anyone who opened tbb-gps.uz could read the GPS password** (view source). No users, no roles | The GPS password stays on the server. People log in with their own account and a role (owner / dispatcher) |
 | Every open tab polled GoGPS itself (1 request/s limit shared by all tabs) | 3 dispatchers = 3× the load; reports stalled behind live polling | One server-side poller; browsers get updates over a live stream (SSE) |
 | No database: history only from GoGPS reports on demand | No analytics, no trends, no trip counts | SQLite: position samples, gate events, yard visits, daily per-vehicle totals, alerts |
 | No camera data | — | Gate events read from the NVR: plate, photos, GPS check, live yard board |
