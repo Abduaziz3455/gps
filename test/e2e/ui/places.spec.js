@@ -208,6 +208,7 @@ test.describe('suggested places', () => {
     await signIn('owner', 'joylar');
     await rowOf(page, c).locator('[data-ignore]').click();
     await expect(page.locator('#plSuggest tr[data-c]', { hasText: `${c.visits} marta` })).toHaveCount(0);
+    await expect(page.locator('.toast', { hasText: "E'tiborsiz qoldirildi" })).toContainText('yana taklif qilinadi');
     expect((await owner.post('/api/places/common/search', {})).data.some((x) => x.lat === c.lat)).toBe(false);
     await page.reload();
     await page.locator('#app').waitFor({ state: 'visible' });
@@ -215,15 +216,55 @@ test.describe('suggested places', () => {
     await expect(page.locator('#plSuggest tr[data-c]', { hasText: `${c.visits} marta` })).toHaveCount(0);
   });
 
+  test('Joylar: an ignore can be undone from its message', async ({ page, signIn, owner, server }) => {
+    const c = await seedSpot(server, owner);
+    await signIn('owner', 'joylar');
+    const rows = page.locator('#plSuggest tr[data-c]', { hasText: `${c.visits} marta` });
+    await rows.first().locator('[data-ignore]').click();
+    await expect(rows).toHaveCount(0);
+    const msg = page.locator('.toast', { hasText: "E'tiborsiz qoldirildi" });
+    await msg.locator('.toast-action', { hasText: 'Qaytarish' }).click();
+    await expect(rows).toHaveCount(1);
+    await expect(msg).toHaveCount(0);
+    await expect(page.locator('.toast', { hasText: 'Qaytarildi' })).toBeVisible();
+    expect((await owner.get('/api/places/common/ignored')).data.some((x) => x.lat === c.lat)).toBe(false);
+  });
+
+  test('Joylar: the ignored list stays folded; it shows the spot and brings it back', async ({ page, signIn, owner, server }) => {
+    const c = await seedSpot(server, owner);
+    await owner.post('/api/places/common/hide', { lat: c.lat, lng: c.lng });
+    const total = (await owner.get('/api/places/common/ignored')).data.length;
+    await signIn('owner', 'joylar');
+    const box = page.locator('#plIgnored');
+    await expect(box.locator('summary')).toHaveText(`E'tiborsiz qoldirilganlar (${total})`);
+    const row = box.locator('tr[data-ig]', { hasText: `${c.visits} marta` });
+    await expect(row, 'closed until asked for').toBeHidden();
+
+    await box.locator('summary').click();
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('km');
+    await row.locator('td').first().click();
+    await expect(row).toHaveClass(/pl-selected/);
+    await expect(page.locator('#plMap path.place-draft')).toHaveCount(1);
+
+    await row.locator('[data-restore]').click();
+    await expect(page.locator('#plSuggest tr[data-c]', { hasText: `${c.visits} marta` })).toHaveCount(1);
+    await expect(row).toHaveCount(0);
+    expect((await owner.get('/api/places/common')).data.some((x) => x.lat === c.lat)).toBe(true);
+  });
+
   test('dispatcher: no suggestions anywhere', async ({ page, signIn, owner, dispatcher, server }) => {
     await seedSpot(server, owner);
     expect((await dispatcher.get('/api/places/common')).status).toBe(403);
+    expect((await dispatcher.get('/api/places/common/ignored')).status).toBe(403);
+    expect((await dispatcher.post('/api/places/common/restore', { lat: 41, lng: 69 })).status).toBe(403);
     await signIn('dispatcher', 'xarita');
     await expect(page.locator('.vrow').first()).toBeVisible();
     await expect(page.locator('#map .leaflet-places-pane .place-mark')).toHaveCount(0);
     await page.evaluate(() => { location.hash = '#/joylar'; });
     await expect(page.locator('#plTable')).toBeVisible();
     await expect(page.locator('#plSuggest')).toBeHidden();
+    await expect(page.locator('#plIgnored')).toBeHidden();
   });
 
   test('owner: tapping a place\'s name on the live map opens it', async ({ page, signIn, owner }) => {

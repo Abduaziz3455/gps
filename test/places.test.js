@@ -292,6 +292,99 @@ test('common places: at most the 20 busiest are offered', async () => {
   void places;
 });
 
+test('an ignored spot comes back only if trucks keep going there, after the ignore period', async () => {
+  const { h, stay, put, places } = setup();
+  const now = Date.now();
+  const at = now - 10 * T.DAY; // ignored 10 days ago
+  const ignored = (when = at) => h.kvSet('common_hidden', [{ ...SITE, at: when }]);
+  const trip = (vid, t) => { stay(vid, t, 20); put(vid, t + 40 * MIN, 'moving', FAR); };
+  // Why it was suggested in the first place: visits before it was ignored.
+  for (let i = 0; i < 4; i++) trip(1 + (i % 2), at - (i + 1) * T.DAY);
+
+  ignored();
+  await places.refreshCommon(now);
+  assert.equal(places.common().length, 0, 'the old visits alone do not bring it back');
+
+  trip(1, at + T.DAY); trip(1, at + 2 * T.DAY); trip(1, at + 3 * T.DAY);
+  await places.refreshCommon(now);
+  assert.equal(places.common().length, 0, 'one truck alone does not bring it back');
+
+  trip(2, at + 4 * T.DAY);
+  await places.refreshCommon(now);
+  const back = places.common();
+  assert.equal(back.length, 1, '4 new visits by 2 trucks bring it back');
+  assert.equal(back[0].visits, 8, 'with all its visits');
+  assert.deepEqual(h.kvGet('common_hidden'), [], 'no longer ignored');
+
+  // Ignoring it again starts over, however busy it is.
+  ignored(now - 2 * T.DAY);
+  for (let i = 0; i < 6; i++) trip(1 + (i % 2), now - 36 * 3600e3 + i * 3600e3);
+  await places.refreshCommon(now);
+  assert.equal(places.common().length, 0, 'stays away during the 7 days, whatever happens');
+  assert.equal(h.kvGet('common_hidden').length, 1);
+  await places.refreshCommon(now + 6 * T.DAY);
+  assert.equal(places.common().length, 1, 'and comes back when they are over');
+});
+
+test('ignoring keeps the date; a spot ignored before the date was kept starts its period now', async () => {
+  const { h, stay, places } = setup();
+  const now = Date.now();
+  for (let i = 0; i < 6; i++) stay(1 + (i % 2), now - (i + 1) * T.DAY, 20);
+  await places.refreshCommon(now);
+  const [c] = places.common();
+
+  places.hideCommon({ lat: c.lat, lng: c.lng });
+  const [saved] = h.kvGet('common_hidden');
+  assert.ok(Math.abs(saved.at - Date.now()) < 5000);
+  h.kvSet('common_hidden', [{ lat: c.lat, lng: c.lng }]);
+  await places.refreshCommon(now);
+  assert.equal(places.common().length, 0, 'not released at once');
+  assert.equal(h.kvGet('common_hidden')[0].at, now, 'dated from now');
+  await places.refreshCommon(now + T.DAY);
+  assert.equal(h.kvGet('common_hidden')[0].at, now, 'the date is not moved again');
+});
+
+test('undoing an ignore: the list, its numbers, and a second undo', async () => {
+  const { h, stay, places } = setup();
+  const now = Date.now();
+  for (let i = 0; i < 6; i++) stay(1 + (i % 2), now - (i + 1) * T.DAY, 20);
+  await places.refreshCommon(now);
+  const [c] = places.common();
+  assert.deepEqual(places.ignored(), []);
+
+  places.hideCommon({ lat: c.lat, lng: c.lng });
+  assert.equal(places.common().length, 0);
+  const [row] = places.ignored();
+  assert.equal(row.visits, 6);
+  assert.equal(row.vehicles, 2);
+  assert.ok(row.at > 0);
+
+  // A spot trucks stop going to drops out of the search; the list still knows what it was.
+  h.run('DELETE FROM positions');
+  await places.refreshCommon(now);
+  assert.equal(places.ignored()[0].visits, 6);
+
+  const code = (fn) => { try { fn(); return 200; } catch (e) { return e.status; } };
+  assert.equal(code(() => places.restoreCommon({ lat: 'x', lng: 1 })), 400);
+  places.restoreCommon({ lat: FAR.lat, lng: FAR.lng });
+  assert.equal(places.ignored().length, 1, 'somewhere else: nothing changes');
+  places.restoreCommon({ lat: c.lat, lng: c.lng });
+  assert.deepEqual(places.ignored(), []);
+  assert.equal(code(() => places.restoreCommon({ lat: c.lat, lng: c.lng })), 200, 'twice is fine');
+});
+
+test('undo restores only that spot; the last ignored comes first', () => {
+  const { h, places } = setup();
+  h.kvSet('common_places', [{ ...SITE, visits: 5, vehicles: 2, days: 2 }, { ...FAR, visits: 4, vehicles: 2, days: 1 }]);
+  h.kvSet('common_hidden', [{ ...SITE, at: 1000 }, { ...FAR, at: 2000 }]);
+  const again = new Places({ h, config, log: console });
+  assert.deepEqual(again.ignored().map((x) => x.visits), [4, 5]);
+  again.restoreCommon(SITE);
+  assert.deepEqual(again.ignored().map((x) => x.visits), [4]);
+  assert.deepEqual(again.common().map((x) => x.visits), [5]);
+  void places;
+});
+
 test('vehicle summary: the same numbers as the Hisobot table', async () => {
   const h = helpers(open(':memory:'));
   h.run("INSERT INTO vehicles (id, name, updated_at) VALUES (1, 'A', 0)");

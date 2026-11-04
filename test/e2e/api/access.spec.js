@@ -24,6 +24,8 @@ const ROUTES = [
   ['GET', '/api/places/common', '/api/places/common', 'owner'],
   ['POST', '/api/places/common/search', '/api/places/common/search', 'owner'],
   ['POST', '/api/places/common/hide', '/api/places/common/hide', 'owner'],
+  ['GET', '/api/places/common/ignored', '/api/places/common/ignored', 'owner'],
+  ['POST', '/api/places/common/restore', '/api/places/common/restore', 'owner'],
   ['GET', '/api/places/:id/vehicles', '/api/places/1/vehicles', 'user'],
   ['POST', '/api/places', '/api/places', 'owner'],
   ['PATCH', '/api/places/:id', '/api/places/1', 'owner'],

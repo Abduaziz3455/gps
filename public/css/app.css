@@ -303,6 +303,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .toast-title { font-weight: 700; }
 .toast-body { grid-column: 1; color: var(--text-2); font-size: 13px; white-space: pre-line; }
 .toast[data-href] { cursor: pointer; }
+.toast-action { grid-column: 1; justify-self: start; margin-top: 4px; }
 .toast .icon-btn { width: 26px; height: 26px; grid-row: 1 / span 2; grid-column: 2; }
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }
 /* small, consistent feedback */
@@ -495,6 +496,13 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table tr.pl-selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-2); }
 .table tr.pl-selected:hover { background: var(--accent-soft); }
 #avgTiles:empty { display: none; }
+.pl-ignored > summary { display: flex; align-items: center; gap: 8px; padding: 12px 14px; cursor: pointer; color: var(--text-2); font-weight: 650; font-size: 13px; list-style: none; }
+.pl-ignored > summary::-webkit-details-marker { display: none; }
+.pl-ignored > summary::before { content: "›"; font-size: 16px; line-height: 1; transition: transform .12s ease; }
+.pl-ignored[open] > summary::before { transform: rotate(90deg); }
+.pl-ignored[open] > summary { border-bottom: 1px solid var(--border); }
+.pl-ignored-note { margin: 0; padding: 10px 14px; }
+@media (prefers-reduced-motion: reduce) { .pl-ignored > summary::before { transition: none; } }
 
 /* ---------- charts ---------- */
 .chart { position: relative; width: 100%; }

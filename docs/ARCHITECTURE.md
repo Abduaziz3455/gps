@@ -194,8 +194,13 @@ address stays in the cards. On maps, places have their own layer under the truck
 **Suggested places.** Hourly, a background search goes through the last 30 days of visits and groups those within 150 m
 of each other. A spot with ≥ 3 visits by ≥ 2 vehicles is suggested to the owner (one truck parked at its driver's home
 doesn't qualify): the 20 busiest, listed on the Joylar page and not drawn on the maps. Clicking a row shows the spot on
-that page's map. The owner names it, which makes it an ordinary place, or ignores it for good. Dispatchers don't see
+that page's map. The owner names it, which makes it an ordinary place, or ignores it. Dispatchers don't see
 suggestions. The yard's surroundings and named places are left out.
+
+An ignored spot stays away for 7 days. After that it comes back if it got at least 3 visits by at least 2 trucks since it
+was ignored, the bar for a new suggestion; visits from before don't count. Ignoring it again starts over. The 7 days
+is a judgement call, not a measurement: production has too little history to measure it.
+An ignore can be undone from the message that follows it, or later from the folded list of ignored spots on Joylar.
 
 **Thresholds, checked on real data** (production, 3–4 Nov 2026: about 1.5 days, 20 trucks, 12.7k samples). Worth
 measuring again once there are some weeks of data.

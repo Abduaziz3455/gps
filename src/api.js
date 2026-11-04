@@ -187,6 +187,8 @@ function buildApi(ctx) {
   r.get('/api/places/common', (req) => { owner(req); return places.common(); }); // suggestions: only the owner can act on them
   r.post('/api/places/common/search', async (req) => { owner(req); await places.refreshCommon(); return places.common(); });
   r.post('/api/places/common/hide', (req) => { owner(req); places.hideCommon(req.body); return { ok: true }; });
+  r.get('/api/places/common/ignored', (req) => { owner(req); return places.ignored(); });
+  r.post('/api/places/common/restore', (req) => { owner(req); places.restoreCommon(req.body); return { ok: true }; });
   r.get('/api/places/stats', (req) => { user(req); const { from, to } = range(req.query); return places.stats(from, to); });
   r.get('/api/places/:id/vehicles', (req, res, p) => { user(req); const { from, to } = range(req.query); return places.vehiclesAt(intParam(p.id, 'id'), from, to); });
   r.post('/api/places', (req) => { owner(req); return places.create(req.body, req.user); });

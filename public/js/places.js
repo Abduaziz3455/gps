@@ -1,7 +1,7 @@
 // Places: named areas on the map. Which place a point is in, and the panel that marks or edits one.
 /* global L */
 import { del, get, patch, post, state } from './api.js';
-import { $, confirmDialog, debounce, el, html, icon, toast } from './ui.js';
+import { $, confirmDialog, debounce, el, html, icon, toast, toastError } from './ui.js';
 
 export const RADIUS = { min: 50, max: 2000, def: 150 };
 
@@ -34,8 +34,28 @@ export function nameAt(lat, lng) {
 }
 
 export async function loadPlaces() {
-  [state.places, state.commonPlaces] = await Promise.all([get('/api/places'), state.isOwner ? get('/api/places/common') : []]);
+  [state.places, state.commonPlaces, state.ignoredPlaces] = await Promise.all([
+    get('/api/places'),
+    state.isOwner ? get('/api/places/common') : [],
+    state.isOwner ? get('/api/places/common/ignored') : [],
+  ]);
   state.emit('places:changed');
+}
+
+/** Stop suggesting a spot, with a way back right there in the message. */
+export async function ignoreSpot(lat, lng) {
+  await post('/api/places/common/hide', { lat, lng });
+  toast({
+    title: "E'tiborsiz qoldirildi", body: 'Transportlar bu yerga qatnashda davom etsa, keyinroq yana taklif qilinadi', kind: 'good', timeout: 10000,
+    action: { label: 'Qaytarish', onClick: () => restoreSpot(lat, lng).catch(toastError) },
+  });
+  state.emit('places');
+}
+
+export async function restoreSpot(lat, lng) {
+  await post('/api/places/common/restore', { lat, lng });
+  toast({ title: 'Qaytarildi', body: 'Bu joy yana taklif qilinadi', kind: 'good', timeout: 4000 });
+  state.emit('places');
 }
 
 let openPanel = null; // one at a time, on any map
@@ -129,8 +149,8 @@ export function placePanel({ host, map, lat, lng, place = null, common = null, n
 
   $('[data-hide]', box)?.addEventListener('click', async () => {
     try {
-      await post('/api/places/common/hide', { lat, lng });
-      saved('Bu joy boshqa taklif qilinmaydi', '');
+      await ignoreSpot(lat, lng);
+      close();
     } catch (ex) { fail(ex); }
   });
 

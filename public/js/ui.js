@@ -138,11 +138,12 @@ export const GATE_STATUS = {
 export const statusHtml = (s) => html`<span class="status ${s}">${STATUS[s] || s}</span>`;
 
 // --- toasts ---
-export function toast({ title, body = '', kind = '', href = null, timeout = 6000 }) {
+export function toast({ title, body = '', kind = '', href = null, timeout = 6000, action = null }) {
   const t = el(`<div class="toast ${esc(kind)}" role="status"${href ? ` data-href="${esc(href)}"` : ''}>
     <div class="toast-title">${esc(title)}</div><button class="icon-btn" aria-label="Yopish">${icon('close')}</button>
-    ${body ? `<div class="toast-body">${esc(body)}</div>` : ''}</div>`);
+    ${body ? `<div class="toast-body">${esc(body)}</div>` : ''}${action ? `<button class="btn btn-sm toast-action" type="button">${esc(action.label)}</button>` : ''}</div>`);
   const close = () => t.remove();
+  t.querySelector('.toast-action')?.addEventListener('click', (e) => { e.stopPropagation(); close(); action.onClick(); });
   t.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); close(); });
   if (href) t.addEventListener('click', () => { location.hash = href.replace(/^\/?#/, '#'); close(); });
   $('#toasts').prepend(t);

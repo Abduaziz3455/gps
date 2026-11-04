@@ -7,7 +7,8 @@
  * samples in the background and kept in `place_visits`, so pages only read a small table.
  *
  * Suggestions: spots where several trucks keep stopping are found the same way and listed for the owner on the Joylar
- * page, who names one (it becomes a place) or ignores it. They are not drawn on the maps.
+ * page, who names one (it becomes a place) or ignores it. They are not drawn on the maps. An ignored spot comes back if
+ * trucks keep going there.
  *
  * Nothing here touches the poller or the positions table: the work runs on its own timer, one day of samples at a
  * time, giving way to other requests in between. If it fails, the rest of the app doesn't notice.
@@ -33,6 +34,7 @@ const COMMON = {
   minVisits: 3, minVehicles: 2, // one truck parked at its driver's home isn't a common place; one big pour is a real site
   yardMarginM: 100, placeMarginM: 50, hiddenM: 200,
   max: 20, // busiest first: naming or ignoring one brings the next
+  ignoreForMs: 7 * T.DAY, // an ignored spot stays away this long; then visits since ignoring it can bring it back
 };
 
 /**
@@ -137,10 +139,62 @@ class Places {
       && !hidden.some((x) => haversineM(c.lat, c.lng, x.lat, x.lng) <= COMMON.hiddenM)).slice(0, COMMON.max);
   }
 
-  hideCommon(b) {
+  _point(b) {
     if (typeof b.lat !== 'number' || typeof b.lng !== 'number' || !(Math.abs(b.lat) <= 90) || !(Math.abs(b.lng) <= 180)) throw httpError(400, "Nuqta noto'g'ri");
-    this.h.kvSet('common_hidden', [...this.h.kvGet('common_hidden', []), { lat: b.lat, lng: b.lng }]);
+  }
+
+  _spotNear(x) { return this.commonAll.find((c) => haversineM(c.lat, c.lng, x.lat, x.lng) <= COMMON.hiddenM); }
+
+  hideCommon(b) {
+    this._point(b);
+    const c = this._spotNear(b); // its numbers then, for the list: a spot trucks stop going to drops out of the search
+    this.h.kvSet('common_hidden', [...this.h.kvGet('common_hidden', []), { lat: b.lat, lng: b.lng, at: Date.now(), visits: c?.visits ?? null, vehicles: c?.vehicles ?? null }]);
     bus.emit('places');
+  }
+
+  /** The ignored spots, last ignored first, with their current numbers when the search still finds them. */
+  ignored() {
+    return this.h.kvGet('common_hidden', []).map((x) => {
+      const c = this._spotNear(x);
+      return { lat: x.lat, lng: x.lng, at: x.at ?? null, visits: c?.visits ?? x.visits ?? null, vehicles: c?.vehicles ?? x.vehicles ?? null };
+    }).sort((a, b) => (b.at || 0) - (a.at || 0));
+  }
+
+  /** Undo an ignore. Doing it twice is fine: the undo button and the list can both be on screen. */
+  restoreCommon(b) {
+    this._point(b);
+    const hidden = this.h.kvGet('common_hidden', []);
+    const rest = hidden.filter((x) => haversineM(x.lat, x.lng, b.lat, b.lng) > 1);
+    if (rest.length !== hidden.length) {
+      this.h.kvSet('common_hidden', rest);
+      bus.emit('places');
+    }
+  }
+
+  /**
+   * Ignored spots that trucks kept going to come back: after the ignore period, as many visits since ignoring as a new
+   * suggestion needs. Visits from before ignoring don't count: that was what the owner decided about. Ignoring it again
+   * starts over. Returns whether the list changed.
+   */
+  _releaseIgnored(visits, now) {
+    const hidden = this.h.kvGet('common_hidden', []);
+    if (!hidden.length) return false;
+    let changed = false;
+    const kept = [];
+    for (const x of hidden) {
+      if (x.at == null) changed = true; // ignored before the date was kept: the period starts now
+      const at = x.at ?? now;
+      if (now - at >= COMMON.ignoreForMs) {
+        const since = visits.filter((v) => v.t >= at && haversineM(v.lat, v.lng, x.lat, x.lng) <= COMMON.hiddenM);
+        if (since.length >= COMMON.minVisits && new Set(since.map((v) => v.vehicle_id)).size >= COMMON.minVehicles) {
+          changed = true;
+          continue;
+        }
+      }
+      kept.push({ ...x, at });
+    }
+    if (changed) this.h.kvSet('common_hidden', kept);
+    return changed;
   }
 
   /**
@@ -183,7 +237,8 @@ class Places {
       for (const vid of [...open.keys()]) flush(vid);
       const found = findCommon(visits);
       if (this.stopped) return;
-      const changed = JSON.stringify(found) !== JSON.stringify(this.commonAll);
+      const released = this._releaseIgnored(visits, now);
+      const changed = released || JSON.stringify(found) !== JSON.stringify(this.commonAll);
       this.commonAll = found;
       this.h.kvSet('common_places', found);
       if (changed) bus.emit('places');

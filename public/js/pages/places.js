@@ -1,10 +1,10 @@
 // Joylar: the places marked on the map and how many trips (reys) trucks made to each, for any range.
 // Everyone reads; the owner changes a place here and marks new ones on a vehicle's track.
 /* global L */
-import { get, post, qs, state } from '../api.js';
+import { get, qs, state } from '../api.js';
 import { $, $$, html, setHtml, icon, typeIcon, num, dur, when, toastError, downloadCsv } from '../ui.js';
 import { createMap } from '../map.js';
-import { RADIUS, distanceM, placePanel } from '../places.js';
+import { RADIUS, distanceM, ignoreSpot, placePanel, restoreSpot } from '../places.js';
 import { rangeControl, rangeFromQuery, rangeText, replaceQuery, reportTabs } from './reports.js';
 
 const stay = (min) => (min == null ? '—' : dur(min * 60));
@@ -29,6 +29,7 @@ export default {
           <section class="card"><div id="plTable"><div class="empty"><div class="spinner" style="margin:auto"></div></div></div></section>
           <section class="card" id="plDetail" hidden></section>
           <section class="card" id="plSuggest" hidden></section>
+          <details class="card pl-ignored" id="plIgnored" hidden></details>
         </div>
         <section class="card pl-map-card" id="plMapCard"><div class="pl-map" id="plMap"></div></section>
       </div>
@@ -92,8 +93,30 @@ export default {
           <td class="right nowrap"><button class="btn btn-sm btn-ghost" type="button" data-ignore>E'tiborsiz qoldirish</button> <button class="btn btn-sm" type="button" data-name>Nomlash</button></td></tr>`)}</tbody></table></div>`);
     };
 
+    /** The spots the owner ignored, folded away: only the owner has it, and only when there are some. */
+    const drawIgnored = () => {
+      const box = $('#plIgnored', main);
+      const list = state.ignoredPlaces;
+      box.hidden = !list.length;
+      if (!list.length) { box.open = false; return; }
+      const count = (v) => (v == null ? '—' : v);
+      setHtml(box, html`<summary>E'tiborsiz qoldirilganlar (${list.length})</summary>
+        <p class="small muted pl-ignored-note">Transportlar bu yerga qatnashda davom etsa, 7 kundan keyin o'zi yana taklif qilinadi.</p>
+        <div class="table-wrap"><table class="table"><thead><tr><th class="num">Tashrif</th><th class="num">Transport</th><th class="num">Hovlidan</th><th>Qachon</th><th></th></tr></thead>
+        <tbody>${list.map((c, i) => html`<tr class="clickable" data-ig="${i}"><td class="num"><b>${count(c.visits)}</b> marta</td><td class="num">${count(c.vehicles)}</td><td class="num nowrap">${yardKm(c)}</td><td class="nowrap">${c.at ? when(c.at) : '—'}</td>
+          <td class="right"><button class="btn btn-sm" type="button" data-restore>Qaytarish</button></td></tr>`)}</tbody></table></div>`);
+    };
+
+    const showSpot = (c, row) => {
+      for (const r of $$('tr[data-c], tr[data-ig]', main)) r.classList.toggle('pl-selected', r === row);
+      clearPreview();
+      preview = L.circle([c.lat, c.lng], { radius: RADIUS.def, className: 'place-draft', interactive: false }).addTo(map);
+      focus({ ...c, radiusM: RADIUS.def });
+    };
+
     const load = async () => {
       drawSuggestions();
+      drawIgnored();
       $('#plRange', main).textContent = rangeText(range);
       try {
         rows = await get(`/api/places/stats?${qs(range)}`);
@@ -133,16 +156,19 @@ export default {
       const c = row && state.commonPlaces[Number(row.dataset.c)];
       if (!c) return;
       if (e.target.closest('[data-ignore]')) {
-        try { await post('/api/places/common/hide', { lat: c.lat, lng: c.lng }); state.emit('places'); } catch (ex) { toastError(ex); }
+        try { await ignoreSpot(c.lat, c.lng); } catch (ex) { toastError(ex); }
       } else if (e.target.closest('[data-name]')) {
         clearPreview();
         placePanel({ host: $('#plMapCard', main), map, lat: c.lat, lng: c.lng, common: c, note: `${c.days} kunda ${c.vehicles} ta transport ${c.visits} marta to'xtagan` });
-      } else {
-        for (const r of $$('tr[data-c]', $('#plSuggest', main))) r.classList.toggle('pl-selected', r === row);
-        clearPreview();
-        preview = L.circle([c.lat, c.lng], { radius: RADIUS.def, className: 'place-draft', interactive: false }).addTo(map);
-        focus({ ...c, radiusM: RADIUS.def });
-      }
+      } else showSpot(c, row);
+    });
+    $('#plIgnored', main).addEventListener('click', async (e) => {
+      const row = e.target.closest('tr[data-ig]');
+      const c = row && state.ignoredPlaces[Number(row.dataset.ig)];
+      if (!c) return;
+      if (e.target.closest('[data-restore]')) {
+        try { await restoreSpot(c.lat, c.lng); } catch (ex) { toastError(ex); }
+      } else showSpot(c, row);
     });
     $('#plSuggest', main).addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('tr[data-c]')) e.target.click(); });
 
