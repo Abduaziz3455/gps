@@ -129,15 +129,55 @@ test('blocked while the app is open: back to the login form within seconds', asy
 });
 
 test.describe('navigation', () => {
-  test('owner: seven sections in the sidebar', async ({ page, signIn }) => {
+  const MENU = ['Xarita', 'Darvoza', 'Transport', 'Hisobot'];
+  const navLabels = (page) => page.locator('#nav a span:not(.i):not(.badge)');
+  const reportTabs = (page) => page.locator('#main .tabs a');
+
+  test('the sidebar has four sections, for both roles', async ({ page, signIn }) => {
     await signIn('owner');
-    await expect(page.locator('#nav a span:not(.i):not(.badge)')).toHaveText(['Xarita', 'Darvoza', 'Ogohlantirish', 'Transport', 'Tahlil', 'Hisobot', 'Sozlamalar']);
+    await expect(navLabels(page)).toHaveText(MENU);
   });
 
-  test('dispatcher: no Tahlil', async ({ page, signIn }) => {
+  test('dispatcher: the same four sections; no Tahlil', async ({ page, signIn }) => {
     await signIn('dispatcher');
-    await expect(page.locator('#nav a[data-path=tahlil]')).toHaveCount(0);
-    await expect(page.locator('#nav a')).toHaveCount(6);
+    await expect(navLabels(page)).toHaveText(MENU);
+    await page.click('#nav a[data-path=hisobot]');
+    await expect(page).toHaveURL(/#\/hisobot/);
+    await expect(reportTabs(page)).toHaveText(['Transportlar', 'Joylar']);
+  });
+
+  test('owner: Hisobot opens on the overview; the tabs walk through the section', async ({ page, signIn }) => {
+    await signIn('owner');
+    await page.click('#nav a[data-path=hisobot]');
+    await expect(page).toHaveURL(/#\/tahlil/);
+    await expect(page.locator('#anKpis .tile').first()).toBeVisible();
+    await expect(reportTabs(page)).toHaveText(['Umumiy', 'Transportlar', 'Joylar']);
+    for (const [label, path, ready] of [['Transportlar', 'hisobot', '#repTable table'], ['Joylar', 'joylar', '#plTable'], ['Umumiy', 'tahlil', '#anKpis .tile']]) {
+      await reportTabs(page).filter({ hasText: label }).click();
+      await expect(page).toHaveURL(new RegExp(`#/${path}`));
+      await expect(page.locator(ready).first()).toBeVisible();
+      await expect(reportTabs(page).filter({ hasText: label })).toHaveAttribute('aria-current', 'page');
+      await expect(page.locator('#main .tabs a[aria-current=page]')).toHaveCount(1);
+      await expect(page.locator('#nav a[aria-current=page]')).toHaveText('Hisobot');
+      await expect(page.locator('#pageTitle')).toHaveText('Hisobotlar');
+    }
+  });
+
+  for (const [path, title, ready] of [['ogohlantirish', 'Ogohlantirishlar', '#alCount'], ['sozlamalar', 'Sozlamalar', '#setPanel h3'], ['tahlil', 'Hisobotlar', '#anKpis .tile'], ['joylar', 'Hisobotlar', '#plTable'], ['hisobot', 'Hisobotlar', '#repTable table']]) {
+    test(`an old address still works: #/${path}`, async ({ page, signIn }) => {
+      await signIn('owner', path);
+      await expect(page.locator('#pageTitle')).toHaveText(title);
+      await expect(page.locator(ready).first()).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`#/${path}`));
+    });
+  }
+
+  test('the bell is lit on the alerts page; no menu item is', async ({ page, signIn }) => {
+    await signIn('owner', 'ogohlantirish');
+    await expect(page.locator('#bell')).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('#nav a[aria-current=page]')).toHaveCount(0);
+    await page.click('#nav a[data-path=xarita]');
+    await expect(page.locator('#bell')).toHaveAttribute('aria-current', 'false');
   });
 
   test('a dispatcher with a direct link to Tahlil lands on the map; no analytics request is made', async ({ page, signIn }) => {
@@ -148,11 +188,11 @@ test.describe('navigation', () => {
     expect(calls).toEqual([]);
   });
 
-  for (const [path, title] of [['xarita', 'Jonli xarita'], ['darvoza', 'Darvoza va hovli'], ['ogohlantirish', 'Ogohlantirishlar'], ['transport', 'Transport'], ['tahlil', 'Tahlil'], ['hisobot', 'Hisobotlar'], ['sozlamalar', 'Sozlamalar']]) {
+  for (const [path, title, url = path] of [['xarita', 'Jonli xarita'], ['darvoza', 'Darvoza va hovli'], ['transport', 'Transport'], ['hisobot', 'Hisobotlar', 'tahlil']]) {
     test(`clicking ${path}: right heading, tab title and highlighted link`, async ({ page, signIn }) => {
       await signIn('owner', path === 'xarita' ? 'hisobot' : 'xarita');
       await page.click(`#nav a[data-path=${path}]`);
-      await expect(page).toHaveURL(new RegExp(`#/${path}`));
+      await expect(page).toHaveURL(new RegExp(`#/${url}`));
       await expect(page.locator('#pageTitle')).toHaveText(title);
       await expect(page).toHaveTitle(`${title} · TBB Dispatcher`);
       await expect(page.locator(`#nav a[data-path=${path}]`)).toHaveAttribute('aria-current', 'page');
@@ -247,12 +287,34 @@ test.describe('header', () => {
     await expect(page.locator('#pageTitle')).toHaveText('Sozlamalar');
   });
 
+  test('actions that end something are red: logging out, deleting a user, the final confirmation', async ({ page, signIn }) => {
+    const red = (loc) => loc.evaluate((n) => {
+      const [r, g, b] = getComputedStyle(n).color.match(/\d+/g).map(Number);
+      return r > g * 2 && r > b * 2;
+    });
+    await signIn('owner', 'sozlamalar?tab=foydalanuvchilar');
+    await page.click('#userBtn');
+    await expect(page.locator('#logoutBtn')).toHaveText('Chiqish');
+    expect(await red(page.locator('#logoutBtn')), 'Chiqish').toBe(true);
+    await page.click('#userBtn');
+    const off = page.locator('[data-act=toggle]', { hasText: "O'chirish" }).first();
+    await expect(off).toBeVisible();
+    expect(await red(off), "switching a user off").toBe(true);
+    const del = page.locator('[data-act=delete]').first();
+    expect(await red(del), 'deleting a user').toBe(true);
+    await off.click();
+    const ok = page.locator('.modal [data-ok]');
+    await expect(ok).toBeVisible();
+    const bg = await ok.evaluate((n) => { const [r, g, b] = getComputedStyle(n).backgroundColor.match(/\d+/g).map(Number); return r > g * 2 && r > b * 2; });
+    expect(bg, 'the last step is solid red').toBe(true);
+    await page.locator('.modal [data-close]').last().click();
+  });
+
   test('bell: counts open alerts, opens the list, follows acknowledgements', async ({ page, signIn, owner, server }) => {
     await owner.post('/api/alerts/ack-all');
     const id = alert(server, { title: 'Sinov qo\'ng\'irog\'i' });
     await signIn('owner', 'hisobot');
     await expect(page.locator('#bellCount')).toHaveText('1');
-    await expect(page.locator('#nav [data-badge]')).toHaveText('1');
     await page.click('#bell');
     await expect(page.locator('#pageTitle')).toHaveText('Ogohlantirishlar');
     await owner.post(`/api/alerts/${id}/ack`);

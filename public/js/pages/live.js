@@ -3,6 +3,7 @@
 import { get, state } from '../api.js';
 import { $, $$, html, setHtml, icon, typeIcon, statusHtml, ago, when, num, hm, today, STATUS, debounce, esc } from '../ui.js';
 import { createMap, VehicleLayer } from '../map.js';
+import { placeAt, nameAt } from '../places.js';
 
 const ORDER = { moving: 0, idle: 1, stopped: 2, offline: 3 };
 const SHORT = { moving: 'Harakatda', idle: 'Salt', stopped: "To'xtagan", offline: "Signal yo'q" };
@@ -67,7 +68,7 @@ export default {
     }
 
     function rowHtml(v) {
-      const meta = v.status === 'offline' ? `Oxirgi signal: ${ago(v.recordTime)}` : (v.inYard ? 'Hovlida' : (v.address || '').split(',').slice(0, 2).join(','));
+      const meta = v.status === 'offline' ? `Oxirgi signal: ${ago(v.recordTime)}` : (v.inYard ? 'Hovlida' : placeAt(v.lat, v.lng)?.name || (v.address || '').split(',').slice(0, 2).join(','));
       return html`<button class="vrow ${v.status}" role="option" data-id="${v.id}" aria-selected="${selected === v.id}">
         <span class="vicon">${typeIcon(v.type)}</span>
         <span class="vname">${v.label}</span>
@@ -87,6 +88,7 @@ export default {
       const v = state.vehicles.get(selected);
       if (!v) { drawer.hidden = true; return; }
       drawer.hidden = false;
+      const place = placeAt(v.lat, v.lng);
       const fuel = v.today.fuelLevel != null ? html`<div><b>${num(v.today.fuelLevel)} L</b><span>Bakda</span></div>` : html`<div><b>${v.today.fuel != null ? num(v.today.fuel, 1) : '—'}</b><span>Yoqilg'i, L</span></div>`;
       setHtml(drawer, html`
         <div class="drawer-head">
@@ -101,6 +103,7 @@ export default {
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${statusHtml(v.status)}${v.inYard ? html`<span class="yard-tag">Hovlida</span>` : ''}
             ${v.status === 'moving' ? html`<span class="pill info">${Math.round(v.speed)} km/soat</span>` : ''}</div>
           <dl class="kv">
+            ${place ? html`<dt>Joy</dt><dd><b>${place.name}</b></dd>` : ''}
             <dt>Manzil</dt><dd>${v.address || '—'}</dd>
             <dt>Signal</dt><dd>${when(v.recordTime)} (${ago(v.recordTime)})</dd>
             ${v.lastGate ? html`<dt>Darvoza</dt><dd><a href="#/darvoza?event=${v.lastGate.id}">${v.lastGate.direction === 'in' ? 'Kirdi' : 'Chiqdi'} ${when(v.lastGate.t)}</a></dd>` : ''}
@@ -132,7 +135,7 @@ export default {
         if (pts.length > 1) L.polyline(pts, { color: '#2a78d6', weight: 4, opacity: 0.85 }).addTo(g);
         for (const s of t.stops) {
           L.marker([s.lat, s.lng], { icon: L.divIcon({ className: '', html: '<div class="stop-marker"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }) })
-            .bindTooltip(`To'xtash: ${hm(s.start)}–${s.end ? hm(s.end) : 'hozir'}`).addTo(g);
+            .bindTooltip(`To'xtash: ${hm(s.start)}–${s.end ? hm(s.end) : 'hozir'}${nameAt(s.lat, s.lng) ? ` · ${esc(nameAt(s.lat, s.lng))}` : ''}`).addTo(g);
         }
         g.addTo(map);
         track = { layer: g, vehicle: id, info: pts.length > 1 ? `Bugun: ${t.points.length} nuqta, ${t.stops.length} to'xtash (5 daq+)` : "Bugun uchun iz yo'q" };
@@ -175,14 +178,14 @@ export default {
       }
       refreshRows();
     });
+    const offPlaces = state.on('places:changed', refreshRows);
     // Ages ("3 daq oldin") tick even without new data.
     const tick = setInterval(() => { if (selected) renderDrawer(); }, 30e3);
 
     renderChips();
     renderList();
     if (selected) select(selected);
-    void esc;
 
-    return () => { off(); clearInterval(tick); destroy(); };
+    return () => { off(); offPlaces(); clearInterval(tick); destroy(); };
   },
 };

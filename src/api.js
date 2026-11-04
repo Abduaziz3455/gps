@@ -11,11 +11,13 @@ const { COOKIE, httpError } = require('./auth');
 const { serveTile } = require('./tiles');
 const { vehicleLabel, vehicleType, prettyPlate, plateKey } = require('./gps/normalize');
 const { view: gateView } = require('./gate');
+const { Places } = require('./places');
 
 const VEHICLE_TYPES = ['auto', 'mixer', 'dump', 'excavator', 'car', 'other'];
 
 function buildApi(ctx) {
   const { h, config, auth, poller, gate, analytics, rules, push, gps, health: monitor } = ctx;
+  const places = ctx.places || new Places({ h, config, log: ctx.log });
   const r = new Router();
 
   // --- guards ----------------------------------------------------------------------------------
@@ -131,6 +133,22 @@ function buildApi(ctx) {
     return analytics.vehicleDays(id, from, to);
   });
 
+  r.get('/api/vehicles/:id/summary', (req, res, p) => {
+    user(req);
+    const id = intParam(p.id, 'id');
+    const { from, to } = range(req.query, 14);
+    const s = analytics.vehicleSummary(id, from, to);
+    if (!s) throw httpError(404, 'Transport topilmadi');
+    return s;
+  });
+
+  r.get('/api/vehicles/:id/places', (req, res, p) => {
+    user(req);
+    const id = intParam(p.id, 'id');
+    const { from, to } = range(req.query, 14);
+    return places.ofVehicle(id, from, to);
+  });
+
   r.get('/api/vehicles/:id/events', (req, res, p) => {
     user(req);
     const id = intParam(p.id, 'id');
@@ -163,6 +181,17 @@ function buildApi(ctx) {
     if (stopCache.size > 500) stopCache.delete(stopCache.keys().next().value);
     return data;
   });
+
+  // --- places (areas named on the map): everyone reads, the owner marks ------------------------------
+  r.get('/api/places', (req) => { user(req); return places.list(); });
+  r.get('/api/places/common', (req) => { owner(req); return places.common(); }); // suggestions: only the owner can act on them
+  r.post('/api/places/common/search', async (req) => { owner(req); await places.refreshCommon(); return places.common(); });
+  r.post('/api/places/common/hide', (req) => { owner(req); places.hideCommon(req.body); return { ok: true }; });
+  r.get('/api/places/stats', (req) => { user(req); const { from, to } = range(req.query); return places.stats(from, to); });
+  r.get('/api/places/:id/vehicles', (req, res, p) => { user(req); const { from, to } = range(req.query); return places.vehiclesAt(intParam(p.id, 'id'), from, to); });
+  r.post('/api/places', (req) => { owner(req); return places.create(req.body, req.user); });
+  r.patch('/api/places/:id', (req, res, p) => { owner(req); return places.update(intParam(p.id, 'id'), req.body); });
+  r.delete('/api/places/:id', (req, res, p) => { owner(req); places.remove(intParam(p.id, 'id')); return { ok: true }; });
 
   // --- gate ------------------------------------------------------------------------------------
   r.get('/api/gate-events', (req) => {
@@ -421,6 +450,7 @@ function buildApi(ctx) {
     const handlers = {
       positions: (list) => send('positions', list.map((p) => { const v = vmap.get(p.id); return v && v.active ? liveView(v, p) : null; }).filter(Boolean)),
       vehicles: () => { vmap = vehiclesById(); send('vehicles', {}); },
+      places: () => send('places', {}),
       gate: (ev) => send('gate', ev),
       'gate:update': (ev) => send('gate:update', ev),
       alert: (a) => send('alert', a),

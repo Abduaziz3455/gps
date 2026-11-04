@@ -12,11 +12,12 @@ const T = require('./time');
 const { vehicleLabel } = require('./gps/normalize');
 
 class Rules {
-  constructor({ h, config, poller, gate, log = console }) {
+  constructor({ h, config, poller, gate, places = null, log = console }) {
     this.h = h;
     this.cfg = config;
     this.poller = poller;
     this.gate = gate;
+    this.places = places;
     this.log = log;
     this.over = new Map(); // vehicleId -> consecutive polls over the limit
     this.movingAt = new Map(); // vehicleId -> last record time while moving
@@ -27,6 +28,9 @@ class Rules {
     const v = this.h.get('SELECT * FROM vehicles WHERE id = ?', id);
     return v ? vehicleLabel(v) : `#${id}`;
   }
+
+  /** Where it is, in the words people use: the place's name when it has one, otherwise the GPS address. */
+  where(p) { return this.places?.at(p.lat, p.lng)?.name || p.address || ''; }
 
   raise({ key, type, severity, vehicleId = null, t = Date.now(), title, body = '', data = null, silent = false }) {
     const r = this.h.run(`INSERT OR IGNORE INTO alerts (key, type, severity, vehicle_id, t, title, body, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -55,7 +59,7 @@ class Rules {
         const bucket = Math.floor(p.recordTime / 1800e3);
         this.raise({
           key: `speeding:${p.id}:${bucket}`, type: 'speeding', severity: 'warning', vehicleId: p.id, t: p.recordTime,
-          title: `Tezlik oshirildi: ${this.label(p.id)}`, body: `${Math.round(p.speed)} km/soat (chegara ${limit}) · ${p.address || ''}`,
+          title: `Tezlik oshirildi: ${this.label(p.id)}`, body: `${Math.round(p.speed)} km/soat (chegara ${limit}) · ${this.where(p)}`,
           data: { speed: p.speed, lat: p.lat, lng: p.lng },
         });
       }
@@ -83,7 +87,7 @@ class Rules {
       if (p.recordTime && now - p.recordTime > offMs && active.has(p.id)) {
         this.raise({
           key: `no_signal:${p.id}:${p.recordTime}`, type: 'no_signal', severity: 'warning', vehicleId: p.id, t: now,
-          title: `GPS signal yo'q: ${this.label(p.id)}`, body: `Oxirgi ma'lumot: ${T.localIso(p.recordTime).slice(0, 16).replace('T', ' ')} · ${p.address || ''}`,
+          title: `GPS signal yo'q: ${this.label(p.id)}`, body: `Oxirgi ma'lumot: ${T.localIso(p.recordTime).slice(0, 16).replace('T', ' ')} · ${this.where(p)}`,
           silent: now - p.recordTime > T.DAY,
         });
       }
@@ -93,7 +97,7 @@ class Rules {
         if (lastMove && now - lastMove > this.cfg.rules.longStopMin * 60e3 && now - lastMove < 12 * 3600e3) {
           this.raise({
             key: `long_stop:${p.id}:${lastMove}`, type: 'long_stop', severity: 'info', vehicleId: p.id, t: now,
-            title: `Uzoq to'xtash: ${this.label(p.id)}`, body: `${Math.round((now - lastMove) / 60e3)} daqiqadan beri hovlidan tashqarida turibdi · ${p.address || ''}`,
+            title: `Uzoq to'xtash: ${this.label(p.id)}`, body: `${Math.round((now - lastMove) / 60e3)} daqiqadan beri hovlidan tashqarida turibdi · ${this.where(p)}`,
             data: { lat: p.lat, lng: p.lng },
           });
         }

@@ -1,15 +1,19 @@
 // App shell: login, role-aware navigation, hash router, live stream, header widgets.
 import { api, get, post, state, connectStream } from './api.js';
 import { $, $$, html, icon, setHtml, toast, hm, hms, when, esc } from './ui.js';
+import { loadPlaces } from './places.js';
 
+// `nav`: in the sidebar and the phone's bottom bar. `section`: a tab of that page (reportTabs in pages/reports.js).
+// The rest have their own way in at the top of the screen: the bell for alerts, the user menu for settings.
 const PAGES = [
-  { path: 'xarita', title: 'Jonli xarita', label: 'Xarita', icon: 'map', load: () => import('./pages/live.js') },
-  { path: 'darvoza', title: 'Darvoza va hovli', label: 'Darvoza', icon: 'gate', load: () => import('./pages/gate.js') },
-  { path: 'ogohlantirish', title: 'Ogohlantirishlar', label: 'Ogohlantirish', icon: 'bell', load: () => import('./pages/alerts.js'), badge: true },
-  { path: 'transport', title: 'Transport', label: 'Transport', icon: 'truck', load: () => import('./pages/vehicle.js') },
-  { path: 'tahlil', title: 'Tahlil', label: 'Tahlil', icon: 'chart', load: () => import('./pages/analytics.js'), owner: true },
-  { path: 'hisobot', title: 'Hisobotlar', label: 'Hisobot', icon: 'report', load: () => import('./pages/reports.js') },
-  { path: 'sozlamalar', title: 'Sozlamalar', label: 'Sozlamalar', icon: 'settings', load: () => import('./pages/settings.js') },
+  { path: 'xarita', title: 'Jonli xarita', label: 'Xarita', icon: 'map', nav: true, load: () => import('./pages/live.js') },
+  { path: 'darvoza', title: 'Darvoza va hovli', label: 'Darvoza', icon: 'gate', nav: true, load: () => import('./pages/gate.js') },
+  { path: 'ogohlantirish', title: 'Ogohlantirishlar', load: () => import('./pages/alerts.js') },
+  { path: 'transport', title: 'Transport', label: 'Transport', icon: 'truck', nav: true, load: () => import('./pages/vehicle.js') },
+  { path: 'joylar', title: 'Hisobotlar', section: 'hisobot', load: () => import('./pages/places.js') },
+  { path: 'tahlil', title: 'Hisobotlar', section: 'hisobot', load: () => import('./pages/analytics.js'), owner: true },
+  { path: 'hisobot', title: 'Hisobotlar', label: 'Hisobot', icon: 'report', nav: true, load: () => import('./pages/reports.js') },
+  { path: 'sozlamalar', title: 'Sozlamalar', load: () => import('./pages/settings.js') },
 ];
 
 let cleanup = null;
@@ -66,9 +70,11 @@ async function startApp() {
   $('#userRole').textContent = `${user.username} · ${user.role === 'owner' ? 'Rahbar' : 'Dispetcher'}`;
   setHtml($('#bell'), html`${icon('bell')}<span id="bellCount" class="badge" hidden>0</span>`);
   setHtml($('#themeBtn'), icon('theme'));
+  setHtml($('#logoutBtn'), html`${icon('logout')}<span>Chiqish</span>`);
   buildNav();
   wireHeader();
   await loadVehicles();
+  await loadPlaces().catch(() => {}); // the app works without them
   stopStream?.();
   stopStream = connectStream();
   wireLive();
@@ -80,11 +86,12 @@ async function startApp() {
 }
 
 function buildNav() {
-  const pages = PAGES.filter((p) => !p.owner || state.isOwner);
-  const link = (p) => html`<a href="#/${p.path}" data-path="${p.path}" title="${p.label}">${icon(p.icon)}<span>${p.label}</span>${p.badge ? html`<span class="badge nav-badge" data-badge hidden>0</span>` : ''}</a>`;
+  const pages = PAGES.filter((p) => p.nav);
+  // Reports open on their first tab, which is the owner's overview.
+  const target = (p) => (p.path === 'hisobot' && state.isOwner ? 'tahlil' : p.path);
+  const link = (p) => html`<a href="#/${target(p)}" data-path="${p.path}" title="${p.label}">${icon(p.icon)}<span>${p.label}</span></a>`;
   setHtml($('#nav'), html`${pages.map(link)}`);
-  const mobile = pages.filter((p) => ['xarita', 'darvoza', 'ogohlantirish', 'tahlil', 'hisobot', 'sozlamalar'].includes(p.path)).slice(0, 5);
-  setHtml($('#tabbar'), html`${mobile.map(link)}`);
+  setHtml($('#tabbar'), html`${pages.map(link)}`);
 }
 
 function wireHeader() {
@@ -124,6 +131,7 @@ function wireLive() {
     state.emit('vehicles:changed', list.map((p) => p.id));
   });
   state.on('vehicles', () => loadVehicles().catch(() => {}));
+  state.on('places', () => loadPlaces().catch(() => {}));
   state.on('gate', (ev) => {
     if (ev.status === 'vetoed') return;
     const head = ev.direction === 'in' ? 'KIRDI' : 'CHIQDI';
@@ -156,11 +164,10 @@ async function refreshAlertsCount() {
   } catch { /* ignore */ }
 }
 function renderBadges() {
-  for (const b of [$('#bellCount'), ...$$('[data-badge]')]) {
-    if (!b) continue;
-    b.textContent = state.unacked > 99 ? '99+' : String(state.unacked);
-    b.hidden = !state.unacked;
-  }
+  const b = $('#bellCount');
+  if (!b) return;
+  b.textContent = state.unacked > 99 ? '99+' : String(state.unacked);
+  b.hidden = !state.unacked;
 }
 
 const STATE_DOT = { ok: 'ok', warn: 'warn', bad: 'bad' };
@@ -213,7 +220,8 @@ async function route() {
   const [path, ...rest] = pathPart.split('/');
   let page = PAGES.find((p) => p.path === path) || PAGES[0];
   if (page.owner && !state.isOwner) page = PAGES[0];
-  for (const a of $$('#nav a, #tabbar a')) a.setAttribute('aria-current', a.dataset.path === page.path ? 'page' : 'false');
+  for (const a of $$('#nav a, #tabbar a')) a.setAttribute('aria-current', a.dataset.path === (page.section || page.path) ? 'page' : 'false');
+  $('#bell').setAttribute('aria-current', page.path === 'ogohlantirish' ? 'page' : 'false');
   $('#pageTitle').textContent = page.title;
   document.title = `${page.title} · TBB Dispatcher`;
   $('#modalRoot').innerHTML = '';

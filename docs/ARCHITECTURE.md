@@ -80,6 +80,7 @@ overview snapshot is attached instead.
 | `src/cameras/*` | NVR client (digest auth), plate rules, in/out tracker (ports of the notifier) |
 | `src/gate.js` | Camera pipeline: captures → decisions → gate events → GPS resolution → photos → notifications |
 | `src/analytics.js` | Daily per-vehicle totals (rollups) and every analytics query |
+| `src/places.js` | Named places on the map and the visits (reys) to them (section 6a) |
 | `src/rules.js` | Alert rules (section 7) |
 | `src/push.js` | Web Push subscriptions, per-device preferences, delivery, dead-subscription cleanup |
 | `src/sse.js` | Live stream to browsers: positions, gate events, alerts, system health |
@@ -98,6 +99,7 @@ overview snapshot is attached instead.
 | `gate_events` | ~150/day | one per real pass: plate, vehicle, direction, status (pending / confirmed / unconfirmed / vetoed / outside), time inside, photos |
 | `daily_stats` | 20/day | per vehicle and day: km, engine hours, idling, fuel used, refuels, drains, trips out/in, avg turnaround, yard time, max speed |
 | `fuel_events` | | refuels and drains (GPS `fuelInOut`) |
+| `places`, `place_visits` | | areas the owner named, and the stays in them, worked out from `positions` |
 | `alerts` | | rule hits; acknowledged by a dispatcher |
 | `push_subscriptions` | | per device: endpoint, keys, preferences |
 | `kv` | | VAPID keys, health, last rollups |
@@ -113,12 +115,17 @@ first start. Analytics pages read only from SQLite, so they are instant and don'
 
 Two roles. The owner sees everything the dispatcher sees.
 
+The menu has four items: Xarita, Darvoza, Transport and Hisobot. Tahlil, Hisobotlar and Joylar are tabs of Hisobot (Umumiy,
+Transportlar, Joylar). Alerts open from the bell at the top, which shows the open count, and settings from the user menu.
+Each page keeps its own address.
+
 | Page | Dispatcher | Owner | What it shows |
 |---|:-:|:-:|---|
 | **Xarita** (live map) | ✓ | ✓ | All vehicles live; status filters and search; vehicle card (speed, address, signal age, today's km / trips, last gate event); follow mode; today's track; the yard on the map |
 | **Darvoza** (gate & yard) | ✓ | ✓ | Live feed of entries/exits with photos and the GPS check; who is inside now and for how long; today's counts; filters; photo viewer |
 | **Ogohlantirishlar** (alerts) | ✓ | ✓ | Rule hits (section 7), acknowledge, filter |
-| **Transport** (vehicle page) | ✓ | ✓ | One vehicle over a date range: track replay with stops, gate events, daily km / fuel / trips, refuels and drains |
+| **Transport** (vehicle page) | ✓ | ✓ | One vehicle over a date range: track replay with stops, gate events, daily km / fuel / trips, refuels and drains; average L/100 km and utilization over 14 days; the owner marks a stop as a place here |
+| **Joylar** (places) | ✓ | ✓ | Trips to each named place for any range, which vehicles went, how long they stayed. The owner renames, resizes and deletes |
 | **Tahlil** (analytics) | — | ✓ | At a glance: trips, km, fuel and utilization vs the previous period; daily trips or km; what needs attention (fuel drains, speeding, over-norm fuel, idle vehicles, outside vehicles); vehicles ranked by trips. The full table is in Hisobot |
 | **Hisobotlar** (reports) | ✓ | ✓ | Daily and monthly tables per vehicle, CSV export |
 | **Sozlamalar** (settings) | own notifications | ✓ | Users (create, reset password, disable, role), vehicles (type, plate), alert thresholds, yard, system health |
@@ -159,6 +166,50 @@ Per day, per vehicle and for the fleet; ranges: today, yesterday, 7 / 30 days, t
 The Tahlil page keeps to the headline: trips, km, fuel and utilization against the previous period, one daily
 chart, and an attention list. Per-vehicle detail (engine hours, idling, turnaround, refuels, max speed) is in the
 Hisobot table and on each vehicle's page.
+
+The vehicle page's L/100 km and utilization come from the same query as the Hisobot row (`byVehicle`), over the 14
+days ending on the chosen day. A single day's utilization would only ever be 0 or 100%.
+
+## 6a. Places
+
+The owner clicks a stop on a vehicle's track, names it and picks a radius (150 m by default, 50–2000 m). The point
+itself stays where the truck stopped. The yard already has a name, so it can't be marked, and a point inside a place
+opens that place instead.
+
+| Rule | Why |
+|---|---|
+| A visit (reys) is one stay in the circle with **≥ 5 min standing** | The same rule as the stop marks on the map. Driving through or a traffic light doesn't count |
+| Inside again within 20 min: the same visit | GPS drift at the edge of the circle, a truck shuffling on site |
+| A longer gap: a new visit if the vehicle reported from elsewhere meanwhile; the same visit if it reported nothing | A quiet tracker is not a trip |
+| A visit belongs to the day it began | A stay over midnight is one trip |
+
+This counts arrivals at a place, from GPS. It is separate from the plant's trips (gate exits), which stay as they were.
+
+`place_visits` is worked out from `positions` by bounding box, one day of samples at a time, giving way to other
+requests in between. A new or resized place gets its whole history once; every 5 min the last 24 h are worked out again,
+since records can arrive late. So today's counts can lag by up to 5 min. Nothing here writes to `positions` or runs in
+the poller. Names appear in the live list and card, the vehicle's stops and timeline, and new alert texts; the GPS
+address stays in the cards. On maps, places have their own layer under the trucks, in a passive grey.
+
+**Suggested places.** Hourly, a background search goes through the last 30 days of visits and groups those within 150 m
+of each other. A spot with ≥ 3 visits by ≥ 2 vehicles is suggested to the owner (one truck parked at its driver's home
+doesn't qualify): the 20 busiest, listed on the Joylar page and not drawn on the maps. Clicking a row shows the spot on
+that page's map. The owner names it, which makes it an ordinary place, or ignores it for good. Dispatchers don't see
+suggestions. The yard's surroundings and named places are left out.
+
+**Thresholds, checked on real data** (production, 3–4 Nov 2026: about 1.5 days, 20 trucks, 12.7k samples). Worth
+measuring again once there are some weeks of data.
+
+| Threshold | What the data showed | Decision |
+|---|---|---|
+| Default radius 150 m | Visits per site at 75 / 100 / 150 / 200 / 300 m: 7/8/8/8/7, 8/8/7/7/7, 5/5/5/5/5. Stops at a site spread 11–105 m from its centre | Kept |
+| Yard radius 150 m | 51 stops within 150 m of its centre, none from 150 m to 1 km | Kept |
+| 5 min standing | Stops away from the yard: 511 under 3 min, 21 at 3–5 min, 75 at 5 min or more | Kept |
+| A stop is not a visit | Trucks flicker to "moving" while they stand: 166 pieces were 49 visits | Pieces within 20 min and 150 m are added up |
+| Return gap | Same-spot returns: 54 within 10 min, 4 at 10–20 min, none at 20–90 min | 20 min (was 10) |
+| Spot grouping 150 m | At 100 m the busiest site split (9 visits fell to 7); 200–300 m changed little (10–11) | Kept |
+| Must span several days | The two busiest sites by vehicles (7 and 5 trucks) were each used on one day | Dropped |
+| Minimum visits | ≥ 5 finds 3 sites, ≥ 3 finds 6, all with at least 2 trucks | 3, showing the 20 busiest |
 
 ## 7. Alerts and push notifications
 

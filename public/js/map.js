@@ -2,6 +2,7 @@
 /* global L */
 import { state } from './api.js';
 import { esc, icon } from './ui.js';
+import { closePanelOf, placePanel } from './places.js';
 
 // OpenStreetMap tiles in both themes; the dark theme darkens them with a CSS filter (.map-dark), since the
 // free dark tile services now require API keys.
@@ -36,6 +37,58 @@ function drawYard(map, yard) {
   update();
 }
 
+const PLACE_MIN_RADIUS_PX = 12; // like the yard: a small mark keeps a place findable when its true area is a few pixels
+
+/**
+ * Named places, drawn like the yard in a passive colour, in their own layer under every truck. A name that would land on
+ * another name or on the yard's steps aside until zoomed in. The owner taps a name to change the place.
+ */
+function drawPlaces(map, host) {
+  map.createPane('places');
+  const group = L.layerGroup().addTo(map);
+  let items = [];
+  const update = () => {
+    const placed = [];
+    const yard = state.me?.yard;
+    if (yard) {
+      const y = map.latLngToContainerPoint([yard.lat, yard.lng]);
+      const w = yard.name.length * 7 + 34;
+      placed.push({ l: y.x - w / 2, r: y.x + w / 2, t: y.y - YARD_MIN_RADIUS_PX - 30, b: y.y - YARD_MIN_RADIUS_PX - 3 });
+    }
+    for (const { p, marker } of items) {
+      const root = marker.getElement();
+      const label = root?.querySelector('.place-label');
+      if (!label) continue;
+      const c = map.latLngToContainerPoint([p.lat, p.lng]);
+      const edge = map.latLngToContainerPoint([p.lat + p.radiusM / 111320, p.lng]);
+      const r = Math.abs(c.y - edge.y);
+      const shown = Math.max(r, PLACE_MIN_RADIUS_PX);
+      const w = p.name.length * 6.6 + 34;
+      const box = { l: c.x - w / 2, r: c.x + w / 2, t: c.y - shown - 27, b: c.y - shown - 3 };
+      const hide = placed.some((o) => box.l < o.r && o.l < box.r && box.t < o.b && o.t < box.b);
+      label.hidden = hide;
+      label.style.setProperty('--place-r', `${shown}px`);
+      root.querySelector('.place-halo').hidden = r >= PLACE_MIN_RADIUS_PX;
+      if (!hide) placed.push(box);
+    }
+  };
+  const redraw = () => {
+    group.clearLayers();
+    const owner = state.isOwner;
+    items = state.places.map((p) => {
+      L.circle([p.lat, p.lng], { radius: p.radiusM, className: 'place-area named', interactive: false }).addTo(group);
+      const marker = L.marker([p.lat, p.lng], { pane: 'places', interactive: owner, keyboard: false, icon: L.divIcon({ className: '', iconSize: [0, 0],
+        html: `<div class="place-mark${owner ? ' can-edit' : ''}"><div class="place-halo"></div><div class="place-label named">${icon('pin')}<span>${esc(p.name)}</span></div></div>` }) }).addTo(group);
+      if (owner) marker.on('click', () => placePanel({ host, map, lat: p.lat, lng: p.lng, place: p }));
+      return { p, marker };
+    });
+    update();
+  };
+  map.on('zoomend', update);
+  redraw();
+  return state.on('places:changed', redraw);
+}
+
 /** Working trucks are drawn over parked ones; the selected one over everything. */
 const markerZ = (v, selected) => (selected ? 1000 : { moving: 500, idle: 400, stopped: 100 }[v.status] || 0);
 
@@ -55,6 +108,7 @@ export function createMap(node, { center, zoom = 12 } = {}) {
   const setTiles = () => node.classList.toggle('map-dark', isDark());
   setTiles();
   if (yard) drawYard(map, yard);
+  const offPlaces = drawPlaces(map, node.parentElement);
   const setZoom = () => node.classList.toggle('map-near', map.getZoom() >= NEAR_ZOOM);
   map.on('zoomend', setZoom);
   setZoom();
@@ -66,7 +120,8 @@ export function createMap(node, { center, zoom = 12 } = {}) {
   return {
     map,
     destroy() {
-      off(); mq.removeEventListener?.('change', setTiles); ro.disconnect();
+      off(); offPlaces(); mq.removeEventListener?.('change', setTiles); ro.disconnect();
+      closePanelOf(map);
       // Leaving mid-zoom: Leaflet's pending zoom-end timer would run on the removed map.
       map._animatingZoom = false; // its zoom-end timer returns early when no zoom is in progress
       map.stop();

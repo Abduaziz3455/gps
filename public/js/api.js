@@ -25,7 +25,7 @@ export const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) =>
 
 /** Tiny observable app state shared by the pages. */
 class State {
-  constructor() { this.listeners = new Map(); this.me = null; this.vehicles = new Map(); this.health = null; this.unacked = 0; }
+  constructor() { this.listeners = new Map(); this.me = null; this.vehicles = new Map(); this.places = []; this.commonPlaces = []; this.health = null; this.unacked = 0; }
   on(ev, fn) { if (!this.listeners.has(ev)) this.listeners.set(ev, new Set()); this.listeners.get(ev).add(fn); return () => this.listeners.get(ev)?.delete(fn); }
   emit(ev, data) { for (const fn of this.listeners.get(ev) || []) { try { fn(data); } catch (e) { console.error(e); } } }
   get isOwner() { return this.me?.user.role === 'owner'; }
@@ -37,7 +37,7 @@ export function connectStream() {
   let es = null, retry = 2000;
   const open = () => {
     es = new EventSource('/api/stream');
-    for (const ev of ['hello', 'positions', 'vehicles', 'gate', 'gate:update', 'alert', 'alert:update', 'health']) {
+    for (const ev of ['hello', 'positions', 'vehicles', 'places', 'gate', 'gate:update', 'alert', 'alert:update', 'health']) {
       es.addEventListener(ev, (e) => { retry = 2000; state.emit(ev, JSON.parse(e.data)); });
     }
     es.onopen = () => state.emit('stream', true);

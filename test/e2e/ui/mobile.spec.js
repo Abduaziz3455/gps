@@ -7,7 +7,8 @@ test('owner: the tab bar reaches the main sections', async ({ page, signIn }) =>
   await signIn('owner');
   await expect(page.locator('#tabbar')).toBeVisible();
   await expect(page.locator('.sidebar')).toBeHidden();
-  for (const [path, title] of [['darvoza', 'Darvoza va hovli'], ['ogohlantirish', 'Ogohlantirishlar'], ['tahlil', 'Tahlil'], ['hisobot', 'Hisobotlar'], ['xarita', 'Jonli xarita']]) {
+  await expect(page.locator('#tabbar a')).toHaveCount(4);
+  for (const [path, title] of [['darvoza', 'Darvoza va hovli'], ['transport', 'Transport'], ['hisobot', 'Hisobotlar'], ['xarita', 'Jonli xarita']]) {
     await page.locator(`#tabbar a[data-path=${path}]`).tap();
     await expect(page.locator('#pageTitle')).toHaveText(title);
     await expect(page.locator(`#tabbar a[data-path=${path}]`)).toHaveAttribute('aria-current', 'page');
@@ -21,15 +22,23 @@ test('owner: Settings is reachable through the user menu', async ({ page, signIn
   await expect(page.locator('#pageTitle')).toHaveText('Sozlamalar');
 });
 
-test('owner: the Transport list is reachable from a menu', async ({ page, signIn }) => {
+test('alerts: the bell opens them; the tabs of Hisobot fit and work by touch', async ({ page, signIn }) => {
   await signIn('owner');
-  const links = page.locator('#tabbar a[data-path=transport], #userDrop a[href="#/transport"]');
-  expect(await links.count(), 'on a phone, the owner has no link to the Transport section').toBeGreaterThan(0);
+  await page.locator('#bell').tap();
+  await expect(page.locator('#pageTitle')).toHaveText('Ogohlantirishlar');
+  await page.locator('#tabbar a[data-path=hisobot]').tap();
+  const joylar = page.locator('#main .tabs a', { hasText: 'Joylar' });
+  await expect(joylar).toBeVisible();
+  await joylar.tap();
+  await expect(page).toHaveURL(/#\/joylar/);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  expect(overflow, 'the page does not scroll sideways').toBeLessThanOrEqual(0);
 });
 
-test('dispatcher: the tab bar has Settings', async ({ page, signIn }) => {
+test('dispatcher: Settings is reachable through the user menu', async ({ page, signIn }) => {
   await signIn('dispatcher');
-  await page.locator('#tabbar a[data-path=sozlamalar]').tap();
+  await page.locator('#userBtn').tap();
+  await page.locator('#userDrop a[href="#/sozlamalar"]').tap();
   await expect(page.locator('#pageTitle')).toHaveText('Sozlamalar');
 });
 

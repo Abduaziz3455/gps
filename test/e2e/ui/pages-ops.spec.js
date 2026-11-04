@@ -28,7 +28,7 @@ test.describe('live map', () => {
   test('the yard is drawn and labelled', async ({ page, signIn, server }) => {
     await signIn('owner');
     await expect(page.locator('.yard-label', { hasText: 'TBB hovli' })).toHaveCount(1);
-    await expect(page.locator('.leaflet-overlay-pane path')).toHaveCount(1);
+    await expect(page.locator('.leaflet-overlay-pane path.yard-area')).toHaveCount(1);
     void server;
   });
 

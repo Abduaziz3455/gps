@@ -25,6 +25,8 @@
   /* the yard: a colour no vehicle status uses */
   --yard: #7c3aed;
   --yard-soft: #eee6fd;
+  /* places the owner named: passive, they should not compete with the trucks or the yard */
+  --place: #66717c;
   /* vehicle status (marks); text next to them stays in text tokens */
   --st-moving: #0ca30c;
   --st-idle: #e09a00;
@@ -51,7 +53,7 @@
     --text: #eef0ec; --text-2: #c0c5bf; --text-3: #8d948e;
     --accent: #5598e7; --accent-2: #3987e5; --accent-soft: #15263b; --on-accent: #08121f;
     --good: #4cc24c; --good-soft: #13281a; --warn: #f0b440; --warn-soft: #2e2512; --bad: #ef6b6b; --bad-soft: #321716; --info-soft: #14212f;
-    --st-stopped: #7d93a8; --st-offline: #6b716c; --yard: #a78bfa; --yard-soft: #241a3d;
+    --st-stopped: #7d93a8; --st-offline: #6b716c; --yard: #a78bfa; --yard-soft: #241a3d; --place: #94a0ab;
     --bar: #3987e5;
     --seq-1: #0d366b; --seq-2: #184f95; --seq-3: #1c5cab; --seq-4: #256abf; --seq-5: #3987e5; --seq-6: #6da7ec; --seq-7: #9ec5f4;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .25);
@@ -65,7 +67,7 @@
   --text: #eef0ec; --text-2: #c0c5bf; --text-3: #8d948e;
   --accent: #5598e7; --accent-2: #3987e5; --accent-soft: #15263b; --on-accent: #08121f;
   --good: #4cc24c; --good-soft: #13281a; --warn: #f0b440; --warn-soft: #2e2512; --bad: #ef6b6b; --bad-soft: #321716; --info-soft: #14212f;
-  --st-stopped: #7d93a8; --st-offline: #6b716c; --yard: #a78bfa; --yard-soft: #241a3d;
+  --st-stopped: #7d93a8; --st-offline: #6b716c; --yard: #a78bfa; --yard-soft: #241a3d; --place: #94a0ab;
   --bar: #3987e5;
   --seq-1: #0d366b; --seq-2: #184f95; --seq-3: #1c5cab; --seq-4: #256abf; --seq-5: #3987e5; --seq-6: #6da7ec; --seq-7: #9ec5f4;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .25);
@@ -168,9 +170,15 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-2); 
 .btn:disabled { opacity: .5; cursor: default; }
 .btn-primary { background: var(--accent-2); border-color: transparent; color: #fff; }
 .btn-primary:hover { background: var(--accent); }
-.btn-danger { color: var(--bad); }
 .btn-ghost { border-color: transparent; background: transparent; }
 .btn-sm { height: 30px; padding: 0 10px; font-size: 13px; }
+/* Actions that end something are red wherever they are; the last "are you sure?" step is solid red. */
+.btn-danger { color: var(--bad); background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.btn-danger:hover { color: #fff; background: var(--bad); border-color: var(--bad); }
+.modal-foot .btn-danger { color: #fff; background: var(--bad); border-color: var(--bad); }
+.modal-foot .btn-danger:hover { background: color-mix(in srgb, var(--bad) 85%, #000); }
+:root[data-theme="dark"] .btn-danger:hover, :root[data-theme="dark"] .modal-foot .btn-danger { color: #1f0a0a; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .btn-danger:hover, :root:where(:not([data-theme="light"])) .modal-foot .btn-danger { color: #1f0a0a; } }
 .btn-block { width: 100%; }
 .icon-btn { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; border: 0; background: transparent; color: var(--text-2); cursor: pointer; position: relative; }
 .icon-btn:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
@@ -192,7 +200,6 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-2); 
 .nav a { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--text-2); font-weight: 600; }
 .nav a:hover { background: var(--surface-2); text-decoration: none; color: var(--text); }
 .nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
-.nav .nav-badge { margin-left: auto; }
 .nav-sep { margin: 10px 10px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); font-weight: 700; }
 .sidebar-foot { margin-top: auto; }
 .health { display: grid; gap: 6px; padding: 10px; font-size: 12px; color: var(--text-3); }
@@ -208,6 +215,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-2); 
 .clock { font-variant-numeric: tabular-nums; color: var(--text-2); font-weight: 600; margin-right: 6px; }
 .badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--out); color: #fff; font-size: 11px; font-weight: 700; }
 .bell .badge { position: absolute; top: 2px; right: 0; }
+.bell[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
 .user-menu { position: relative; }
 .user-btn { display: flex; align-items: center; gap: 8px; border: 0; background: transparent; padding: 4px 8px 4px 4px; border-radius: 20px; cursor: pointer; }
 .user-btn:hover { background: var(--surface-2); }
@@ -216,6 +224,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-2); 
 .dropdown { position: absolute; right: 0; top: calc(100% + 6px); min-width: 200px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-lg); padding: 6px; z-index: 1200; display: grid; }
 .dropdown a, .dropdown button { padding: 8px 10px; border-radius: 6px; text-align: left; border: 0; background: transparent; color: var(--text); cursor: pointer; }
 .dropdown a:hover, .dropdown button:hover { background: var(--surface-2); text-decoration: none; }
+.dropdown .menu-danger { display: flex; align-items: center; gap: 8px; color: var(--bad); font-weight: 600; margin-top: 4px; }
+.dropdown .menu-danger:hover { background: var(--bad-soft); }
 .dropdown-head { padding: 8px 10px; font-size: 12px; color: var(--text-3); border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 .main { overflow: auto; min-width: 0; min-height: 0; position: relative; }
 .main:focus { outline: none; }
@@ -408,6 +418,18 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .yard-label .i { width: 14px; height: 14px; }
 :root[data-theme="dark"] .yard-label { color: #17102b; }
 @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .yard-label { color: #17102b; } }
+/* places: drawn like the yard, in a passive colour (drawPlaces in map.js) */
+.leaflet-places-pane { z-index: 450; pointer-events: none; }
+.place-area { stroke: var(--place); stroke-width: 1.5; fill: var(--place); fill-opacity: .12; }
+.place-draft { stroke: var(--accent-2); stroke-width: 2; stroke-dasharray: 6 5; fill: var(--accent-2); fill-opacity: .14; }
+.place-mark { position: relative; width: 0; height: 0; pointer-events: none; }
+.place-halo { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border-radius: 50%; background: color-mix(in srgb, var(--place) 14%, transparent); border: 1.5px solid var(--place); }
+.place-label { position: absolute; left: 0; bottom: calc(var(--place-r, 12px) + 4px); transform: translateX(-50%); display: inline-flex; align-items: center; gap: 3px; max-width: 220px; white-space: nowrap; padding: 2px 8px 2px 5px; border-radius: 999px; background: var(--place); color: #fff; font-size: 11px; font-weight: 650; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.place-label span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.place-label .i { width: 12px; height: 12px; }
+:root[data-theme="dark"] .place-label.named { color: #10161b; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .place-label.named { color: #10161b; } }
+.place-mark.can-edit .place-label, .place-mark.can-edit .place-halo { pointer-events: auto; cursor: pointer; }
 .cluster { width: 40px; height: 40px; border-radius: 50%; background: var(--accent-2); color: #fff; display: grid; place-items: center; font-weight: 800; border: 3px solid var(--surface); box-shadow: 0 2px 6px rgba(0,0,0,.35); }
 .leaflet-container { font: inherit; background: var(--surface-2); }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--surface); color: var(--text); }
@@ -457,6 +479,23 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tl-dot.move { background: var(--st-moving); }
 .tl-dot.fuel { background: var(--accent-2); }
 
+/* the panel that marks a stop as a place: over the map, beside the circle it draws; under the map on phones */
+.map-card, .pl-map-card { position: relative; }
+.place-panel { position: absolute; top: 10px; right: 10px; z-index: 1000; width: min(310px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; display: grid; gap: 10px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); }
+.place-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -4px -6px -4px 0; }
+.place-panel input[name=name] { width: 100%; }
+.place-radius { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 10px; align-items: center; }
+.place-radius input[type=range] { width: 100%; accent-color: var(--accent-2); margin: 0; }
+.place-panel-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.place-panel-foot .spacer { flex: 1; }
+/* Joylar page */
+.pl-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.pl-map { height: clamp(320px, 62vh, 760px); border-radius: var(--radius); overflow: hidden; }
+.pl-map-card { position: sticky; top: 0; }
+.table tr.pl-selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-2); }
+.table tr.pl-selected:hover { background: var(--accent-soft); }
+#avgTiles:empty { display: none; }
+
 /* ---------- charts ---------- */
 .chart { position: relative; width: 100%; }
 .chart svg { display: block; width: 100%; overflow: visible; }
@@ -475,6 +514,9 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; }
 .tabs button { border: 0; background: transparent; padding: 10px 12px; font-weight: 650; color: var(--text-2); border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
 .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent-2); }
+.tabs a { padding: 10px 12px; font-weight: 650; color: var(--text-2); border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs a:hover { color: var(--text); text-decoration: none; }
+.tabs a[aria-current="page"] { color: var(--accent); border-bottom-color: var(--accent-2); }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); min-width: 0; }
 .setting-row > :first-child { min-width: 0; }
 .setting-row:last-child { border-bottom: 0; }
@@ -495,7 +537,9 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
    notebook (901-1279): list beside the map, sidebar shrinks to icons so the map keeps its room
    desktop and big monitors: full sidebar; content grows, then centres */
 @media (max-width: 1279px) {
-  .gate, .vpage { grid-template-columns: minmax(0, 1fr); }
+  .gate, .vpage, .pl-grid { grid-template-columns: minmax(0, 1fr); }
+  .pl-map-card { position: relative; order: -1; }
+  .pl-map { height: clamp(240px, 42vh, 460px); }
   .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (min-width: 901px) and (max-width: 1279px) {
@@ -504,7 +548,6 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .sidebar .brand { justify-content: center; padding: 4px 0 8px; }
   .brand-text, .nav a > span:not(.i):not(.badge), .health-row span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .nav a { justify-content: center; padding: 11px 0; position: relative; }
-  .nav .nav-badge { position: absolute; top: 2px; right: 4px; margin: 0; }
   .health { justify-items: center; padding: 10px 0; }
   .clock { margin-right: 0; }
 }
@@ -518,7 +561,6 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .tabbar a > span:not(.i):not(.badge) { white-space: nowrap; }
   .tabbar a[aria-current="page"] { color: var(--accent); }
   .tabbar a:hover { text-decoration: none; }
-  .tabbar .badge { position: absolute; top: 0; left: calc(50% + 6px); }
   .clock, .user-name { display: none; }
   .page { padding: 14px 16px 24px; }
   .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
@@ -531,6 +573,9 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .live { grid-template-columns: minmax(0, 1fr); grid-template-rows: 44% minmax(0, 1fr); }
   .live-side { order: 2; border-right: 0; border-top: 1px solid var(--border); }
   .map-wrap { order: 1; }
+  .place-panel { position: static; width: auto; max-height: none; box-shadow: none; border: 0; border-top: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius); }
+  /* the live page has no room under its map: a sheet, like the vehicle card */
+  .map-wrap .place-panel { position: fixed; top: auto; left: 8px; right: 8px; bottom: calc(64px + env(safe-area-inset-bottom)); max-height: 62dvh; z-index: 1500; border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); }
   .drawer { position: fixed; top: auto; bottom: calc(64px + env(safe-area-inset-bottom)); left: 8px; right: 8px; width: auto; max-height: 62dvh; z-index: 1500; }
   .ev { grid-template-columns: 76px minmax(0, 1fr) auto; gap: 10px; padding: 10px 12px; }
   .ev-thumb { width: 76px; height: 52px; }
@@ -554,7 +599,6 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .tabbar { padding-block: 0; }
   .tabbar a { padding: 3px 2px; }
   .tabbar a > span:not(.i):not(.badge) { display: none; }
-  .tabbar .badge { top: -2px; }
   .fchip { padding-block: 4px; }
   .sys-banner:not(.open) .sys-text { display: none; }
   .sys-item { padding-block: 4px; }
@@ -610,6 +654,17 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 @media (max-width: 1279px) { .an-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) { .an-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .an-barcol { display: none; } }
 .set-panel, .set-host { min-width: 0; }
+.tabs button:focus-visible, .tabs a:focus-visible { outline-offset: -3px; border-radius: 6px; } /* the tab bar scrolls, so it would clip an outline outside */
+/* Tizim: groups of equal cards, with every label column the same width */
+.set-system { display: grid; gap: 12px; }
+.set-group-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; min-height: 30px; }
+.set-group-head:first-child { margin-top: 0; }
+.set-group-head h3 { font-size: 15px; }
+.set-group-head .spacer { flex: 1; }
+.set-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+.set-system .kv { grid-template-columns: 140px minmax(0, 1fr); }
+.set-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 6px 32px; }
+.set-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; padding: 10px 14px; border-top: 1px solid var(--border); }
 .vtable td, .vtable th { white-space: nowrap; }
 .vtable tbody tr:focus-visible { outline-offset: -2px; }
 .veh-edit td { vertical-align: top; }

@@ -261,6 +261,16 @@ class Analytics {
     return this.byVehicle(from, to);
   }
 
+  /** One vehicle's fuel use and utilization over a range, by the same rules as the Tahlil page and Hisobot. */
+  vehicleSummary(id, from, to) {
+    const r = this.byVehicle(from, to).find((v) => v.id === id);
+    if (!r) return null;
+    return {
+      from, to, days: r.days, activeDays: r.activeDays, utilization: r.days ? Math.round((r.activeDays / r.days) * 100) : null,
+      km: r.km, fuelUsed: r.fuelUsed, fuelPer100: r.fuelPer100, fuelNorm: r.fuelNorm,
+    };
+  }
+
   /** Per-day rows for one vehicle. */
   vehicleDays(id, from, to) {
     const rows = new Map(this.h.all('SELECT * FROM daily_stats WHERE vehicle_id = ? AND day BETWEEN ? AND ?', id, from, to).map((r) => [r.day, r]));

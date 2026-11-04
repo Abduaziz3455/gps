@@ -4,7 +4,7 @@
 import { get, qs } from '../api.js';
 import { $, html, setHtml, icon, typeIcon, esc, num, dayLabel, shortDay, toastError } from '../ui.js';
 import { barChart, responsive } from '../charts.js';
-import { presetRange, rangeFromQuery, replaceQuery, rangeText, PRESET_LABELS } from './reports.js';
+import { presetRange, rangeFromQuery, replaceQuery, rangeText, reportTabs, PRESET_LABELS } from './reports.js';
 
 const PRESETS = ['today', 'd7', 'd30', 'month'];
 
@@ -59,6 +59,7 @@ export default {
     let seq = 0, alive = true, dispose = null;
 
     setHtml(main, html`<div class="page">
+      ${reportTabs('tahlil')}
       <div class="page-head">
         <div class="small muted" id="anRange"></div>
         <span class="spacer"></span>

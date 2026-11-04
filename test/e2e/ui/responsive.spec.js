@@ -7,7 +7,7 @@ const SCREENS = [
   ['small phone', 320, 568], ['phone', 390, 844], ['phone on its side', 844, 390], ['tablet', 768, 1024],
   ['small notebook', 1024, 768], ['notebook', 1366, 768], ['monitor', 1920, 1080], ['big monitor', 2560, 1440],
 ];
-const PAGES = ['xarita', 'darvoza', 'ogohlantirish', 'transport', 'tahlil', 'hisobot', 'sozlamalar'];
+const PAGES = ['xarita', 'darvoza', 'ogohlantirish', 'transport', 'joylar', 'tahlil', 'hisobot', 'sozlamalar'];
 
 /** Runs in the page. Returns what's wrong with the layout, in words. */
 function layoutProblems(root = '#app') {

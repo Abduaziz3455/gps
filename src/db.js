@@ -147,6 +147,25 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   fails      INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS places (            -- areas the owner named, from a point where a truck stopped
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  lat        REAL NOT NULL,
+  lng        REAL NOT NULL,
+  radius_m   INTEGER NOT NULL,
+  created_by INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS place_visits (      -- worked out from positions (src/places.js)
+  place_id   INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+  vehicle_id INTEGER NOT NULL,
+  enter_t    INTEGER NOT NULL,
+  exit_t     INTEGER NOT NULL,
+  stopped_s  INTEGER NOT NULL,
+  PRIMARY KEY (place_id, vehicle_id, enter_t)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS place_visits_v ON place_visits(vehicle_id, enter_t);
 `;
 
 function open(file) {

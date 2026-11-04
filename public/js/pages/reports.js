@@ -1,9 +1,23 @@
 // Hisobotlar: per-vehicle totals for a day range (dispatchers too), totals row, CSV and print.
 // Also exports the date-range control and the per-vehicle table that the Tahlil page reuses.
-import { get, qs } from '../api.js';
+import { get, qs, state } from '../api.js';
 import { $, html, setHtml, icon, num, today, isDay, addDays, dayLabel, toastError, downloadCsv, sortRows, typeIcon, when } from '../ui.js';
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// --- the section's tabs ----------------------------------------------------------------------------
+
+const REPORT_TABS = [
+  { path: 'tahlil', label: 'Umumiy', owner: true },
+  { path: 'hisobot', label: 'Transportlar' },
+  { path: 'joylar', label: 'Joylar' },
+];
+
+/** Tahlil, Hisobot and Joylar are one section of the menu; each stays its own page with its own address. */
+export function reportTabs(active) {
+  return html`<nav class="tabs no-print" aria-label="Hisobot bo'limlari">${REPORT_TABS.filter((t) => !t.owner || state.isOwner)
+    .map((t) => html`<a href="#/${t.path}" aria-current="${t.path === active ? 'page' : 'false'}">${t.label}</a>`)}</nav>`;
+}
 
 // --- date range ----------------------------------------------------------------------------------
 
@@ -198,6 +212,7 @@ export default {
     let alive = true;
 
     setHtml(main, html`<div class="page report-page">
+      ${reportTabs('hisobot')}
       <div class="page-head">
         <div>
           <h2 id="repTitle"></h2>

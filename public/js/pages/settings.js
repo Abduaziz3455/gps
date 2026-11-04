@@ -339,12 +339,12 @@ async function renderUsers(panel) {
           <td class="nowrap right">
             <button class="btn btn-ghost btn-sm" type="button" data-act="edit">Tahrirlash</button>
             <button class="btn btn-ghost btn-sm" type="button" data-act="password">Parol</button>
-            ${u.id !== me ? html`<button class="btn btn-ghost btn-sm" type="button" data-act="toggle">${u.disabled ? 'Yoqish' : "O'chirish"}</button>
+            ${u.id !== me ? html`<button class="btn btn-ghost btn-sm ${u.disabled ? '' : 'btn-danger'}" type="button" data-act="toggle">${u.disabled ? 'Yoqish' : "O'chirish"}</button>
               <button class="btn btn-ghost btn-sm btn-danger" type="button" data-act="delete" title="Butunlay o'chirish">O'chirib tashlash</button>` : ''}
           </td></tr>`)}</tbody>
       </table></div>
     </section>
-    <p class="small muted" style="margin:0">Rahbar hamma narsani ko'radi (tahlil, sozlamalar). Dispetcher — xarita, darvoza, ogohlantirishlar, transport va hisobotlar. "O'chirish" foydalanuvchini bloklaydi (tarix saqlanadi); "O'chirib tashlash" uni butunlay o'chiradi.</p>`);
+    <p class="small muted" style="margin:10px 2px 0">Rahbar hamma narsani ko'radi (tahlil, sozlamalar). Dispetcher — xarita, darvoza, ogohlantirishlar, transport va hisobotlar. "O'chirish" foydalanuvchini bloklaydi (tarix saqlanadi); "O'chirib tashlash" uni butunlay o'chiradi.</p>`);
   };
   const refresh = async () => { users = await get('/api/users'); draw(); };
   const roleSelect = (v) => html`<label class="field"><span>Rol</span><select name="role">
@@ -507,13 +507,17 @@ async function renderSystem(panel) {
 
   const draw = (s) => {
     const c = s.config;
-    setHtml(panel, html`<div class="grid" style="gap:16px">
+    // Three groups, top to bottom: is it working, what it holds, how it is set up.
+    setHtml(panel, html`<div class="set-system">
       ${state.me.mock ? html`<div class="notice warn">Demo rejim: GPS va kameralar simulyatsiya qilinmoqda (MOCK=1).</div>` : ''}
-      <div class="grid grid-2" style="align-items:start">
+
+      <div class="set-group-head"><h3>Holat</h3><span class="small muted">Ma'lumot holati: ${when(s.time)}</span><span class="spacer"></span>
+        <button class="btn btn-sm" type="button" data-act="reload">${icon('refresh')}<span>Yangilash</span></button></div>
+      <div class="set-cards">
         <section class="card">
           <div class="card-head"><h3>GPS (GoGPS)</h3><span class="spacer"></span>${s.gps ? health(s.gps.lastOk, 60, 300) : html`<span class="pill">Ulanmagan</span>`}</div>
           <div class="card-body">${s.gps ? html`<dl class="kv">
-            <dt>Oxirgi muvaffaqiyatli so'rov</dt><dd>${ago(s.gps.lastOk)}${s.gps.lastOk ? html` <span class="muted">(${when(s.gps.lastOk)})</span>` : ''}</dd>
+            <dt>Oxirgi so'rov</dt><dd>${ago(s.gps.lastOk)}${s.gps.lastOk ? html` <span class="muted">(${when(s.gps.lastOk)})</span>` : ''}</dd>
             <dt>Transportlar (jonli)</dt><dd>${num(s.gps.vehicles)}</dd>
             <dt>Oxirgi xato</dt><dd>${s.gps.error ? html`<span style="color:var(--bad)">${s.gps.error}</span>` : html`<span class="muted">yo'q</span>`}</dd>
           </dl>` : html`<p class="muted" style="margin:0">GPS hisobi .env faylida sozlanmagan.</p>`}</div>
@@ -521,36 +525,47 @@ async function renderSystem(panel) {
         <section class="card">
           <div class="card-head"><h3>Kameralar (NVR)</h3><span class="spacer"></span>${s.nvr ? health(s.nvr.lastOk, 120, 600) : html`<span class="pill">Ulanmagan</span>`}</div>
           <div class="card-body">${s.nvr ? html`<dl class="kv">
-            <dt>Oxirgi muvaffaqiyatli so'rov</dt><dd>${ago(s.nvr.lastOk)}</dd>
+            <dt>Oxirgi so'rov</dt><dd>${ago(s.nvr.lastOk)}</dd>
             <dt>Jonli oqim</dt><dd>${s.nvr.lastStream ? ago(s.nvr.lastStream) : html`<span class="muted">yo'q</span>`}</dd>
             <dt>Qidiruv (arxiv)</dt><dd>${s.nvr.searchOk == null ? '—' : s.nvr.searchOk ? 'ishlayapti' : html`<span style="color:var(--bad)">ishlamayapti</span>`}</dd>
-            <dt>Oxirgi raqam o'qilishi</dt><dd>${s.nvr.lastCapture ? html`${when(s.nvr.lastCapture)} <span class="muted">(${ago(s.nvr.lastCapture)})</span>` : '—'}</dd>
+            <dt>Oxirgi raqam</dt><dd>${s.nvr.lastCapture ? html`${when(s.nvr.lastCapture)} <span class="muted">(${ago(s.nvr.lastCapture)})</span>` : '—'}</dd>
             <dt>Oxirgi xato</dt><dd>${s.nvr.error ? html`<span style="color:var(--bad)">${s.nvr.error}</span>` : html`<span class="muted">yo'q</span>`}</dd>
           </dl>` : html`<p class="muted" style="margin:0">NVR .env faylida sozlanmagan.</p>`}</div>
         </section>
         <section class="card">
-          <div class="card-head"><h3>Ma'lumotlar bazasi</h3></div>
-          <div class="card-body grid" style="gap:12px"><dl class="kv">
-            <dt>Oxirgi hisob-kitob (rollup)</dt><dd>${s.rollupAt ? html`${ago(s.rollupAt)} <span class="muted">(${when(s.rollupAt)})</span>` : '—'}</dd>
-            <dt>GPS nuqtalari</dt><dd class="num">${num(s.counts.positions)}</dd>
-            <dt>Darvoza hodisalari</dt><dd class="num">${num(s.counts.gateEvents)}</dd>
-            <dt>Ogohlantirishlar</dt><dd class="num">${num(s.counts.alerts)}</dd>
-            <dt>Statistika kunlari</dt><dd class="num">${num(s.counts.daysOfStats)}</dd>
-            <dt>Foydalanuvchilar</dt><dd class="num">${num(s.counts.users)}</dd>
-            <dt>Baza hajmi</dt><dd class="num">${mb(s.dbBytes)}</dd>
-            <dt>Server ishlayapti</dt><dd>${dur(s.uptimeS)}</dd>
-          </dl>
-          <div class="form-row"><button class="btn" type="button" data-act="recompute">${icon('refresh')}<span>Bugungi hisobni qayta hisoblash</span></button></div>
-          <p class="small muted" style="margin:0">Bugungi kun har 10 daqiqada avtomatik qayta hisoblanadi; tugma buni darhol bajaradi (GPS hisobotlari qayta so'raladi).</p></div>
-        </section>
-        <section class="card">
           <div class="card-head"><h3>Push bildirishnomalar</h3></div>
           <div class="card-body"><dl class="kv">
-            <dt>Obunalar (qurilmalar)</dt><dd class="num">${num(s.counts.pushSubscriptions)}</dd>
-            <dt>Yuborilgan</dt><dd class="num">${num(s.push.sent)}</dd>
-            <dt>Xato</dt><dd class="num">${s.push.failed ? html`<span style="color:var(--bad)">${num(s.push.failed)}</span>` : '0'}</dd>
+            <dt>Qurilmalar</dt><dd>${num(s.counts.pushSubscriptions)}</dd>
+            <dt>Yuborilgan</dt><dd>${num(s.push.sent)}</dd>
+            <dt>Xato</dt><dd>${s.push.failed ? html`<span style="color:var(--bad)">${num(s.push.failed)}</span>` : '0'}</dd>
           </dl><p class="small muted" style="margin:10px 0 0">Server ishga tushganidan beri.</p></div>
         </section>
+      </div>
+
+      <div class="set-group-head"><h3>Ma'lumotlar</h3></div>
+      <section class="card">
+        <div class="card-body set-columns">
+          <dl class="kv">
+            <dt>GPS nuqtalari</dt><dd>${num(s.counts.positions)}</dd>
+            <dt>Darvoza hodisalari</dt><dd>${num(s.counts.gateEvents)}</dd>
+            <dt>Ogohlantirishlar</dt><dd>${num(s.counts.alerts)}</dd>
+            <dt>Foydalanuvchilar</dt><dd>${num(s.counts.users)}</dd>
+          </dl>
+          <dl class="kv">
+            <dt>Statistika kunlari</dt><dd>${num(s.counts.daysOfStats)}</dd>
+            <dt>Baza hajmi</dt><dd>${mb(s.dbBytes)}</dd>
+            <dt>Server ishlayapti</dt><dd>${dur(s.uptimeS)}</dd>
+            <dt>Oxirgi hisob-kitob</dt><dd>${s.rollupAt ? html`${ago(s.rollupAt)} <span class="muted">(${when(s.rollupAt)})</span>` : '—'}</dd>
+          </dl>
+        </div>
+        <div class="set-card-foot">
+          <span class="small muted">Bugungi kun har 10 daqiqada avtomatik hisoblanadi. Tugma buni darhol bajaradi.</span>
+          <button class="btn btn-sm" type="button" data-act="recompute">${icon('refresh')}<span>Bugungi hisobni qayta hisoblash</span></button>
+        </div>
+      </section>
+
+      <div class="set-group-head"><h3>Sozlamalar</h3><span class="small muted">Serverning .env faylida o'zgartiriladi, keyin server qayta ishga tushiriladi</span></div>
+      <div class="set-cards">
         <section class="card">
           <div class="card-head"><h3>Hovli</h3></div>
           <div class="card-body"><dl class="kv">
@@ -560,17 +575,17 @@ async function renderSystem(panel) {
           </dl></div>
         </section>
         <section class="card">
-          <div class="card-head"><h3>Qoidalar (chegaralar)</h3></div>
+          <div class="card-head"><h3>Chegaralar</h3></div>
           <div class="card-body"><dl class="kv">
             <dt>Tezlik chegarasi</dt><dd>${num(c.speedLimit)} km/soat</dd>
-            <dt>Signal yo'q deb hisoblash</dt><dd>${num(c.offlineMinutes)} daqiqadan keyin</dd>
-            <dt>Uzoq to'xtash</dt><dd>${num(c.longStopMinutes)} daqiqadan ortiq (hovlidan tashqarida)</dd>
+            <dt>Signal yo'q</dt><dd>${num(c.offlineMinutes)} daqiqadan keyin</dd>
+            <dt>Uzoq to'xtash</dt><dd>${num(c.longStopMinutes)} daqiqadan ortiq</dd>
             <dt>Ish vaqti</dt><dd>${c.workHours}</dd>
           </dl></div>
         </section>
       </div>
       <section class="card">
-        <div class="card-head"><h3>Kameralar</h3><span class="small muted">${c.cameras.length} ta</span></div>
+        <div class="card-head"><h3>Kamera kanallari</h3><span class="small muted">${c.cameras.length} ta</span></div>
         <div class="table-wrap"><table class="table">
           <thead><tr><th scope="col">Kanal</th><th scope="col">Nomi</th><th scope="col">Yo'nalish</th><th scope="col">Umumiy ko'rinish kamerasi</th></tr></thead>
           <tbody>${c.cameras.map((cam) => html`<tr><td class="num" style="text-align:left">${cam.channel}</td><td>${cam.name}</td>
@@ -578,8 +593,6 @@ async function renderSystem(panel) {
             <td>${cam.contextChannel ? html`${cam.contextName || ''} <span class="muted">(kanal ${cam.contextChannel})</span>` : html`<span class="muted">—</span>`}</td></tr>`)}</tbody>
         </table></div>
       </section>
-      <div class="notice">${icon('info')} Chegaralar, hovli va kameralar serverning <span class="mono">.env</span> faylida sozlanadi (SPEED_LIMIT_KMH, OFFLINE_MINUTES, LONG_STOP_MINUTES, WORK_HOURS, YARD_*, CAMERAS_JSON); o'zgartirilgandan keyin serverni qayta ishga tushiring.
-        Ma'lumot holati: ${when(s.time)}. <button class="btn btn-ghost btn-sm" type="button" data-act="reload">${icon('refresh')}<span>Yangilash</span></button></div>
     </div>`);
   };
 

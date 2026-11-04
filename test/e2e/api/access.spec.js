@@ -17,6 +17,17 @@ const ROUTES = [
   ['GET', '/api/vehicles/:id/days', `/api/vehicles/${V}/days`, 'user'],
   ['GET', '/api/vehicles/:id/events', `/api/vehicles/${V}/events`, 'user'],
   ['GET', '/api/vehicles/:id/stops', `/api/vehicles/${V}/stops`, 'user'],
+  ['GET', '/api/vehicles/:id/summary', `/api/vehicles/${V}/summary`, 'user'],
+  ['GET', '/api/vehicles/:id/places', `/api/vehicles/${V}/places`, 'user'],
+  ['GET', '/api/places', '/api/places', 'user'],
+  ['GET', '/api/places/stats', '/api/places/stats', 'user'],
+  ['GET', '/api/places/common', '/api/places/common', 'owner'],
+  ['POST', '/api/places/common/search', '/api/places/common/search', 'owner'],
+  ['POST', '/api/places/common/hide', '/api/places/common/hide', 'owner'],
+  ['GET', '/api/places/:id/vehicles', '/api/places/1/vehicles', 'user'],
+  ['POST', '/api/places', '/api/places', 'owner'],
+  ['PATCH', '/api/places/:id', '/api/places/1', 'owner'],
+  ['DELETE', '/api/places/:id', '/api/places/1', 'owner'],
   ['GET', '/api/gate-events', '/api/gate-events', 'user'],
   ['GET', '/api/gate-events/:id', '/api/gate-events/1', 'user'],
   ['PATCH', '/api/gate-events/:id', '/api/gate-events/1', 'user'],
@@ -84,8 +95,11 @@ for (const [method, , url, access] of ROUTES) {
     for (const who of ['owner', 'dispatcher']) {
       test(`${who} is allowed: GET ${url}`, async ({ owner, dispatcher, server }) => {
         const client = who === 'owner' ? owner : dispatcher;
-        const u = url.replace('/gate-events/1', `/gate-events/${server.get('SELECT MIN(id) id FROM gate_events').id}`);
-        expect((await client.get(u)).status).toBe(200);
+        const place = url.startsWith('/api/places/1/') ? (await owner.post('/api/places', { name: `Ruxsat ${who}`, lat: 41.9, lng: 69.9 })).data : null;
+        const u = url.replace('/gate-events/1', `/gate-events/${server.get('SELECT MIN(id) id FROM gate_events').id}`).replace('/places/1/', `/places/${place?.id}/`);
+        try {
+          expect((await client.get(u)).status).toBe(200);
+        } finally { if (place) await owner.del(`/api/places/${place.id}`); }
       });
     }
   }
