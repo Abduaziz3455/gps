@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Camera pipeline: NVR captures -> plate rules and in/out tracker (ported from tbb_car_notifier) ->
+ * Camera pipeline: NVR captures -> plate rules and in/out tracker ->
  * gate events -> GPS match/confirmation -> photos -> notifications.
  *
  * The GPS side is the poller's yard visits (vehicle inside the circle around the yard, polled every 10 s,
@@ -11,13 +11,19 @@
  *   - entry of a fleet vehicle: confirmed when it entered the circle around the capture;
  *   - no plate read: the one fleet vehicle that crossed the circle in the matching direction at that moment;
  *   - a valid plate that isn't in the fleet, at the exit: counts as evidence that the plate belongs to the
- *     vehicle that left right then (learned after 3 consistent exits, as in the notifier); else "outside".
+ *     vehicle that left right then (learned after 3 consistent exits); else "outside".
  * Entries are notified at once; exits and unread plates once resolved (vetoed ones never).
+ *
+ * Two more stages run from the database, so a restart picks up where it stopped:
+ *   top view    the photo with the vehicle under the overview camera, read from the recording (src/cameras/topview.js).
+ *               It replaces the live snapshot when ready; the page updates by itself.
+ *   final       GPS has decided and the top view is settled: 'gate:final' goes out, once, for whatever needs the whole
+ *               story (Telegram alerts). A subscriber that writes to the database joins that transaction.
  */
 const fs = require('node:fs');
 const path = require('node:path');
 const bus = require('./bus');
-const { plateKey, similarPlate, prettyPlate, vehicleLabel, vehicleType } = require('./gps/normalize');
+const { plateKey, similarPlate, prettyPlate, vehicleLabel, vehicleType, haversineM } = require('./gps/normalize');
 const { dayOf } = require('./time');
 
 let sharp = null;
@@ -27,9 +33,13 @@ const LEARN_HITS = 3;
 const FRESH_MS = 2 * 60e3; // the overview snapshot only shows the vehicle for a minute or two
 const NOTIFY_MAX_AGE_MS = 15 * 60e3; // older (catch-up after downtime) events are recorded, not pushed
 const HISTORY_DONE = 'camera_history_done'; // kv: when the first-run camera import succeeded
+const PLAYABLE_WAIT_MS = 4 * 60e3; // the NVR makes a recording playable within 2 min; past this give up waiting
+const PLAYABLE_POLL_MS = 15e3;
+const TOP_VIEW_TRIES = 3;
+const VETO_MOVED_M = 50; // moved less than this around an exit capture: a maneuver. Real ones moved 0-30 m, real exits 69 m or more (5 Nov 2026)
 
 class Gate {
-  constructor({ h, nvr, poller, config, cameras, tracker, plates, log = console }) {
+  constructor({ h, nvr, poller, config, cameras, tracker, plates, topView = null, log = console }) {
     this.h = h;
     this.nvr = nvr;
     this.poller = poller;
@@ -38,6 +48,9 @@ class Gate {
     this.cameras = new Map(config.nvr.cameras.map((c) => [c.channel, c]));
     this.tracker = tracker;
     this.plates = plates;
+    this.topView = topView;
+    this.topRunning = new Map(); // event id -> running job
+    this.topNext = new Map(); // event id -> don't ask the NVR again before this time
     this.log = log;
     this.photoDir = path.join(config.dataDir, 'photos');
     this.searchOk = true;
@@ -155,11 +168,14 @@ class Gate {
     else if (!m && d.valid && d.direction === 'in') status = 'outside';
     else status = 'pending';
     if (status === 'pending') resolveAt = cap.time + this.ncfg.resolveAfterSec * 1000;
+    const live = mode !== 'history';
+    const topView = live && this.topView && d.camera.topView && d.camera.contextChannel ? 'pending' : null;
     const r = this.h.run(`INSERT OR IGNORE INTO gate_events (capture_name, t, direction, camera, channel, plate, plate_raw,
-      plate_valid, vehicle_id, identified_by, status, stay_s, gap, capture_uri, resolve_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      plate_valid, vehicle_id, identified_by, status, stay_s, gap, capture_uri, resolve_at, created_at, top_view, alert_state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     cap.name, cap.time, d.direction, d.camera.name, cap.channel, d.plate, d.raw, d.valid ? 1 : 0,
-    m?.vehicle.id ?? null, m?.how ?? null, status, d.staySeconds ?? null, d.gap ? 1 : 0, cap.uriPath || null, resolveAt, now);
+    m?.vehicle.id ?? null, m?.how ?? null, status, d.staySeconds ?? null, d.gap ? 1 : 0, cap.uriPath || null, resolveAt, now,
+    topView, live ? 'pending' : null);
     if (!r.changes) return;
     const id = Number(r.lastInsertRowid);
     if (mode === 'history') return;
@@ -186,7 +202,10 @@ class Gate {
     if (d.camera.contextChannel && Date.now() - cap.time <= FRESH_MS) {
       try { await save(d.camera.contextName || `ch${d.camera.contextChannel}`, await this.nvr.snapshot(d.camera.contextChannel), 2); } catch (e) { this.log.warn?.(`snapshot: ${e.message}`); }
     }
-    this.h.run('UPDATE gate_events SET photos = ? WHERE id = ?', JSON.stringify(photos), id);
+    // On a slow line the top view can be there first: it stays, and takes the snapshot's place.
+    const now = JSON.parse(this.h.get('SELECT photos FROM gate_events WHERE id = ?', id).photos || '[]').filter((p) => p.v);
+    const kept = photos.filter((p) => !now.some((x) => x.name === p.name));
+    this.h.run('UPDATE gate_events SET photos = ? WHERE id = ?', JSON.stringify([...kept, ...now]), id);
   }
 
   /** Photo file for the API. History events get their capture image from the NVR the first time. */
@@ -214,6 +233,14 @@ class Gate {
     const col = kind === 'exit' ? 'exit_t' : 'enter_t';
     const extra = kind === 'enter' ? 'AND approx = 0' : '';
     return this.h.all(`SELECT DISTINCT vehicle_id FROM yard_visits WHERE ${col} BETWEEN ? AND ? ${extra}`, from, to).map((r) => r.vehicle_id);
+  }
+
+  /** Metres a vehicle covered from 2 min before a capture until `afterMs` after it, from the position samples. */
+  movedAround(vehicleId, t, afterMs) {
+    const ps = this.h.all('SELECT lat, lng FROM positions WHERE vehicle_id = ? AND t BETWEEN ? AND ? ORDER BY t', vehicleId, t - 2 * 60e3, t + afterMs);
+    let m = 0;
+    for (let i = 1; i < ps.length; i++) m += haversineM(ps[i - 1].lat, ps[i - 1].lng, ps[i].lat, ps[i].lng);
+    return m;
   }
 
   resolvePending(now = Date.now()) {
@@ -246,6 +273,10 @@ class Gate {
         if (this.crossings('exit', t - before, t + after).includes(row.vehicle_id)) return set('confirmed', "GPS: hovlidan chiqdi");
         if (live && live.status !== 'offline' && live.inYard) {
           if (now - t < exitConfirm) return later(30e3);
+          // Trucks often pass the exit camera and stand in the yard circle for minutes (paperwork, tarpaulin), and a
+          // standing tracker reports rarely. So being in the circle isn't a veto: only not having moved is.
+          if (this.crossings('exit', t - before, t + exitConfirm).includes(row.vehicle_id)) return set('confirmed', "GPS: hovlidan chiqdi");
+          if (this.movedAround(row.vehicle_id, t, exitConfirm) >= VETO_MOVED_M) return set('unconfirmed', "GPS: chiqqan, lekin hovli yonida turibdi");
           return set('vetoed', `GPS: ${Math.round(exitConfirm / 60e3)} daqiqadan keyin ham hovlida turibdi`);
         }
         if (!gpsFresh && now - t < exitConfirm) return later(30e3);
@@ -288,6 +319,124 @@ class Gate {
     const cands = this.crossings('enter', t - 60e3, t + 3 * 60e3);
     if (cands.length === 1) return set('confirmed', "Raqam o'qilmadi, GPS bo'yicha aniqlandi", { vehicleId: cands[0], how: 'gps' });
     return set('outside', row.plate ? "GPS ro'yxatida yo'q" : "Raqam o'qilmadi");
+  }
+
+  // --- top view --------------------------------------------------------------------------------
+
+  /** Start top view jobs that are due. Runs often; each job runs on its own. */
+  pumpTopViews(now = Date.now()) {
+    if (!this.topView) return;
+    const free = this.ncfg.topViewWorkers - this.topRunning.size;
+    if (free <= 0) return;
+    const rows = this.h.all("SELECT * FROM gate_events WHERE top_view = 'pending' ORDER BY t LIMIT 50");
+    let started = 0;
+    for (const row of rows) {
+      if (started >= free) break;
+      if (this.topRunning.has(row.id) || (this.topNext.get(row.id) || 0) > now) continue;
+      const cam = this.cameras.get(row.channel);
+      if (row.status === 'vetoed' || !cam?.topView || !cam.contextChannel) {
+        this.h.run("UPDATE gate_events SET top_view = NULL WHERE id = ?", row.id);
+        continue;
+      }
+      if (now < row.t + cam.topView.to * 1000) continue; // it isn't over yet
+      started++;
+      const job = this.runTopView(row, cam)
+        .catch((e) => this.log.warn?.(`top view ${row.id}: ${e.message}`))
+        .finally(() => { this.topRunning.delete(row.id); });
+      this.topRunning.set(row.id, job);
+    }
+  }
+
+  async runTopView(row, cam) {
+    const end = row.t + cam.topView.to * 1000;
+    if (!await this.topView.ready(cam.contextChannel, end)) {
+      if (Date.now() - end < PLAYABLE_WAIT_MS) {
+        this.topNext.set(row.id, Date.now() + PLAYABLE_POLL_MS);
+        return;
+      }
+      return this.topViewDone(row.id, 'failed', 'yozuv tayyor bo\'lmadi');
+    }
+    let shot;
+    try {
+      shot = await this.topView.grab(cam, row.t, { final: row.top_view_tries + 1 >= TOP_VIEW_TRIES });
+    } catch (e) {
+      const tries = row.top_view_tries + 1;
+      const note = this.safeError(e);
+      this.log.warn?.(`top view ch${cam.contextChannel} of event ${row.id} failed (${tries}/${TOP_VIEW_TRIES}): ${note}`);
+      if (tries < TOP_VIEW_TRIES) {
+        this.h.run('UPDATE gate_events SET top_view_tries = ? WHERE id = ?', tries, row.id);
+        this.topNext.set(row.id, Date.now() + PLAYABLE_POLL_MS);
+        return;
+      }
+      return this.topViewDone(row.id, 'failed', note);
+    }
+    if (!shot.jpeg) {
+      this.log.info?.(`top view ch${cam.contextChannel} of event ${row.id}: no vehicle in ${shot.frames} frames`);
+      return this.topViewDone(row.id, 'none');
+    }
+    this.log.info?.(`top view ch${cam.contextChannel} of event ${row.id}: vehicle at ${shot.t >= 0 ? '+' : ''}${Math.round(shot.t)} s, ${Math.round(shot.share * 100)}% of the lane, ${shot.passes} pass(es) in ${shot.frames} frames`);
+    await this.saveTopView(row, cam, shot.jpeg);
+    this.topViewDone(row.id, 'done');
+  }
+
+  /** The top view takes the live snapshot's place, after the capture image. */
+  async saveTopView(row, cam, jpeg) {
+    // A catch-up event has no photos yet: the capture image goes first.
+    if (JSON.parse(row.photos || '[]').length === 0 && row.capture_uri) await this.photoFile(row.id, 0).catch((e) => this.log.warn?.(`capture image: ${this.safeError(e)}`));
+    const day = dayOf(row.t);
+    fs.mkdirSync(path.join(this.photoDir, day), { recursive: true });
+    const file = `${day}/${row.id}_top.jpg`;
+    fs.writeFileSync(path.join(this.photoDir, file), jpeg);
+    const name = cam.contextName || `ch${cam.contextChannel}`;
+    const before = JSON.parse(this.h.get('SELECT photos FROM gate_events WHERE id = ?', row.id).photos || '[]');
+    for (const p of before) if (p.name === name && p.file !== file) fs.rmSync(path.join(this.photoDir, p.file), { force: true });
+    const photos = [...before.filter((p) => p.name !== name), { name, file, v: 'top' }];
+    this.h.run('UPDATE gate_events SET photos = ? WHERE id = ?', JSON.stringify(photos), row.id);
+  }
+
+  topViewDone(id, state, note = null) {
+    this.topNext.delete(id);
+    this.h.run('UPDATE gate_events SET top_view = ?, top_view_note = ? WHERE id = ?', state, note, id);
+    const ev = this.get(id);
+    if (ev) bus.emit('gate:update', ev);
+  }
+
+  /** Top views of the last hours, for the status page and the health check. */
+  topViewStats(sinceMs = Date.now() - 24 * 3600e3) {
+    const out = { done: 0, none: 0, failed: 0, pending: 0 };
+    for (const r of this.h.all('SELECT top_view s, COUNT(*) n FROM gate_events WHERE t >= ? AND top_view IS NOT NULL GROUP BY top_view', sinceMs)) out[r.s] = r.n;
+    return out;
+  }
+
+  // --- final -----------------------------------------------------------------------------------
+
+  /**
+   * Events whose story is complete go out on 'gate:final', once.
+   * An entry waits for GPS only until the first look: its confirmation can take 10 minutes and adds nothing. A repeat
+   * entry is vetoed at that first look, so it doesn't get through. Neither does an exit wait once the truck has moved:
+   * that can't be a maneuver any more, and only its confirmation is still open.
+   */
+  finalize(now = Date.now()) {
+    const settled = (row) => {
+      if (row.status !== 'pending') return true;
+      if (!row.vehicle_id || now - row.t < (this.ncfg.resolveAfterSec + 15) * 1000) return false;
+      return row.direction === 'in' || this.movedAround(row.vehicle_id, row.t, now - row.t) >= VETO_MOVED_M;
+    };
+    for (const row of this.h.all("SELECT * FROM gate_events WHERE alert_state = 'pending' ORDER BY t")) {
+      if (row.status === 'vetoed' || now - row.t > this.ncfg.catchupHours * 3600e3) {
+        this.h.run("UPDATE gate_events SET alert_state = 'skipped' WHERE id = ?", row.id);
+        continue;
+      }
+      if (row.top_view === 'pending' || !settled(row)) continue;
+      try {
+        this.h.tx(() => {
+          this.h.run("UPDATE gate_events SET alert_state = 'done' WHERE id = ?", row.id);
+          bus.emit('gate:final', this.get(row.id));
+        });
+      } catch (e) {
+        this.log.warn?.(`final ${row.id}: ${e.message}`); // stays pending: tried again next round
+      }
+    }
   }
 
   notify(id) {
@@ -333,7 +482,16 @@ class Gate {
       this.timers[0] = setTimeout(poll, this.ncfg.pollSeconds * 1000);
     };
     this.timers[0] = setTimeout(poll, this.ncfg.pollSeconds * 1000);
-    const resolveLoop = () => { this.resolvePending(); this.timers[1] = setTimeout(resolveLoop, 5000); };
+    const resolveLoop = () => {
+      try {
+        this.resolvePending();
+        this.pumpTopViews();
+        this.finalize();
+      } catch (e) {
+        this.log.warn?.(`gate loop: ${e.message}`);
+      }
+      this.timers[1] = setTimeout(resolveLoop, 5000);
+    };
     resolveLoop();
     const cleanup = () => { this.cleanupPhotos(); this.timers[2] = setTimeout(cleanup, 6 * 3600e3); };
     this.timers[2] = setTimeout(cleanup, 60e3);
@@ -386,6 +544,7 @@ class Gate {
   stop() {
     this.abort.abort();
     this.timers.forEach(clearTimeout);
+    this.topView?.stop();
   }
 
   cleanupPhotos() {
@@ -444,7 +603,8 @@ function view(row, h) {
     note: row.status_note,
     staySeconds: row.stay_s,
     gap: !!row.gap,
-    photos: Array.from({ length: nPhotos }, (_, i) => ({ name: photos[i]?.name || row.camera, url: `/api/gate-events/${row.id}/photo/${i}` })),
+    topView: row.top_view,
+    photos: Array.from({ length: nPhotos }, (_, i) => ({ name: photos[i]?.name || row.camera, url: `/api/gate-events/${row.id}/photo/${i}${photos[i]?.v ? `?v=${photos[i].v}` : ''}` })),
   };
 }
 

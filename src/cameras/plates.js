@@ -1,5 +1,5 @@
 'use strict';
-/** Uzbek plate validation and misread correction. Exact port of the notifier's plates.py. */
+/** Uzbek plate validation and misread correction.  */
 
 // 01A123BC (private) and 01123ABC (company).
 const FORMATS = [/^(\d{2})[A-Z]\d{3}[A-Z]{2}$/, /^(\d{2})\d{3}[A-Z]{3}$/];

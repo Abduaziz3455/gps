@@ -166,13 +166,57 @@ CREATE TABLE IF NOT EXISTS place_visits (      -- worked out from positions (src
   PRIMARY KEY (place_id, vehicle_id, enter_t)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS place_visits_v ON place_visits(vehicle_id, enter_t);
+CREATE TABLE IF NOT EXISTS outbox (            -- durable delivery queue, one row per recipient (src/notify/outbox.js)
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel      TEXT NOT NULL,                -- telegram (more can be added)
+  target       TEXT NOT NULL,                -- chat id, in the channel's own terms
+  kind         TEXT NOT NULL,                -- what the channel's sender does with it: gate | text | legacy
+  ref          INTEGER,                      -- e.g. the gate event
+  payload      TEXT,                         -- JSON
+  dedupe       TEXT,                         -- same channel + target + dedupe: queued once
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | sent | failed
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  next_attempt INTEGER NOT NULL,
+  last_error   TEXT,
+  created_at   INTEGER NOT NULL,
+  sent_at      INTEGER
+);
+CREATE INDEX IF NOT EXISTS outbox_due ON outbox(status, next_attempt);
+CREATE UNIQUE INDEX IF NOT EXISTS outbox_once ON outbox(channel, target, dedupe) WHERE dedupe IS NOT NULL;
+CREATE TABLE IF NOT EXISTS tg_recipients (     -- Telegram chats added with bot commands (/ulash, /qoshish)
+  chat_id  TEXT PRIMARY KEY,
+  kind     TEXT NOT NULL,                    -- group | user
+  title    TEXT NOT NULL,
+  added_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tg_alerts (         -- what was sent for a gate event: the same text and photos for every recipient
+  event_id INTEGER PRIMARY KEY,
+  caption  TEXT NOT NULL,
+  file_ids TEXT,                             -- JSON: Telegram's copies, so further recipients need no upload
+  built_at INTEGER NOT NULL
+);
 `;
+
+/** Columns added after the first release. CREATE TABLE IF NOT EXISTS doesn't touch a table that already exists. */
+const ADDED_COLUMNS = {
+  gate_events: {
+    top_view: 'TEXT',        // pending | done | none (looked, no vehicle) | failed; NULL: not wanted (history, no top view camera)
+    top_view_note: 'TEXT',
+    top_view_tries: 'INTEGER NOT NULL DEFAULT 0',
+    alert_state: 'TEXT',     // pending until the event is final (GPS decided, top view settled); then done
+  },
+};
 
 function open(file) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  for (const [table, cols] of Object.entries(ADDED_COLUMNS)) {
+    const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [col, type] of Object.entries(cols)) if (!have.has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS gate_events_work ON gate_events(alert_state, top_view) WHERE alert_state = 'pending' OR top_view = 'pending'");
   return db;
 }
 

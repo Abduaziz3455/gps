@@ -46,6 +46,15 @@ function normalizeLast(row, now, offlineMs) {
   return out;
 }
 
+/** One entry of a GoGPS fuelInOut report -> {t, kind: 'refuel'|'drain', litres}, or null when it says nothing usable. */
+function normalizeFuelEvent(f) {
+  const t = parseApiTime(f.startDate);
+  const litres = Math.abs(Number(f.valueFuel) || 0);
+  if (!t || !litres) return null;
+  const refuel = f.event === 'FuelIn' || f.event === 0 || /in|refuel|fill/i.test(String(f.event));
+  return { t, kind: refuel ? 'refuel' : 'drain', litres };
+}
+
 // Some GoGPS names are typed with Cyrillic look-alikes ("85 117 АА").
 const CYR = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X' };
 
@@ -93,4 +102,4 @@ function haversineM(lat1, lng1, lat2, lng2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-module.exports = { STATUSES, statusOf, normalizeLast, plateKey, similarPlate, prettyPlate, vehicleLabel, vehicleType, haversineM };
+module.exports = { STATUSES, statusOf, normalizeLast, normalizeFuelEvent, plateKey, similarPlate, prettyPlate, vehicleLabel, vehicleType, haversineM };

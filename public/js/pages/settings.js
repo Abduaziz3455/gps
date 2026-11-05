@@ -540,6 +540,15 @@ async function renderSystem(panel) {
             <dt>Xato</dt><dd>${s.push.failed ? html`<span style="color:var(--bad)">${num(s.push.failed)}</span>` : '0'}</dd>
           </dl><p class="small muted" style="margin:10px 0 0">Server ishga tushganidan beri.</p></div>
         </section>
+        <section class="card" id="sysTelegram">
+          <div class="card-head"><h3>Telegram</h3><span class="spacer"></span>${s.telegram ? (s.telegram.outbox.pending > 5 ? html`<span class="pill warn">Navbatda ${num(s.telegram.outbox.pending)}</span>` : html`<span class="pill good">Ishlayapti</span>`) : html`<span class="pill">Ulanmagan</span>`}</div>
+          <div class="card-body">${s.telegram ? html`<dl class="kv">
+            <dt>Xabar oluvchilar</dt><dd>${s.telegram.recipients.length ? s.telegram.recipients.map((r) => html`<div>${r.title || r.chatId}</div>`) : html`<span class="muted">yo'q</span>`}</dd>
+            <dt>Yuborilgan</dt><dd>${num(s.telegram.outbox.sent)}</dd>
+            <dt>Yetkazilmagan</dt><dd>${s.telegram.outbox.failed ? html`<span style="color:var(--bad)">${num(s.telegram.outbox.failed)}</span>` : '0'}</dd>
+            ${s.topViews ? html`<dt>Yuqoridan rasm (24 soat)</dt><dd>${num(s.topViews.done)} ta olindi${s.topViews.none ? `, ${num(s.topViews.none)} tasida mashina yo'q` : ''}${s.topViews.failed ? html`, <span style="color:var(--bad)">${num(s.topViews.failed)} ta xato</span>` : ''}</dd>` : ''}
+          </dl><p class="small muted" style="margin:10px 0 0">Oluvchilar botda boshqariladi: /ulash, /qoshish, /uzish.</p>` : html`<p class="muted" style="margin:0">TELEGRAM_BOT_TOKEN .env faylida sozlanmagan.</p>`}</div>
+        </section>
       </div>
 
       <div class="set-group-head"><h3>Ma'lumotlar</h3></div>

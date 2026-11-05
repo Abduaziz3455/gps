@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Trips: a vehicle-day's trips are max(identified exits, identified entries). The exit camera reads fewer
- * plates (42% vs 97% at the entry, notifier site survey) and history has no GPS to identify unread exits,
+ * plates (42% vs 97% at the entry, docs/site-survey.md) and history has no GPS to identify unread exits,
  * so counting exits alone would undercount.
  *
  * Analytics: per-vehicle daily totals (rollups) and the queries behind the dashboards.
@@ -12,7 +12,7 @@
  */
 const bus = require('./bus');
 const T = require('./time');
-const { vehicleLabel, prettyPlate } = require('./gps/normalize');
+const { vehicleLabel, prettyPlate, normalizeFuelEvent } = require('./gps/normalize');
 
 const COUNTED = "('confirmed','unconfirmed','history')"; // real passes (vetoed maneuvers and pending excluded)
 const TURNAROUND_MAX_MS = 12 * 3600e3;
@@ -100,13 +100,11 @@ class Analytics {
       }
       for (const v of inout) {
         for (const f of v.fuels || []) {
-          const refuel = f.event === 'FuelIn' || f.event === 0 || /in|refuel|fill/i.test(String(f.event));
-          const t = T.parseApiTime(f.startDate);
-          const litres = Math.abs(Number(f.valueFuel) || 0);
-          if (!t || !litres) continue;
+          const e = normalizeFuelEvent(f);
+          if (!e) continue;
           const s = g(Number(v.vehicleId));
-          if (refuel) s.refuel_l += litres; else s.drain_l += litres;
-          fuelEvents.push({ vehicle_id: Number(v.vehicleId), t, kind: refuel ? 'refuel' : 'drain', litres });
+          if (e.kind === 'refuel') s.refuel_l += e.litres; else s.drain_l += e.litres;
+          fuelEvents.push({ vehicle_id: Number(v.vehicleId), ...e });
         }
       }
     }

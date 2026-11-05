@@ -6,7 +6,6 @@ Server: Debian with nginx and Docker (`ssh icalluz`, tbb-gps.uz, 5.182.26.55), s
 
 - The NVR must be reachable from this server: `curl -s -o /dev/null -w '%{http_code}\n' http://<NVR_HOST>/ISAPI/System/deviceInfo`
   must print `401` (= it answers and wants a password). If it times out, allow 5.182.26.55 on the site router.
-- GoGPS login and the NVR password: the same values as in the notifier's `.env` (`/opt/tbb_car_notifier` on this server).
 
 ## 2. Get the code
 
@@ -71,8 +70,7 @@ cp nginx.conf /etc/nginx/sites-available/tbb-gps.uz && ln -sf /etc/nginx/sites-a
 1. Log in at https://tbb-gps.uz as the owner. Settings → Users: create the dispatchers' accounts.
 2. Settings → Vehicles: set each truck's type and, where GoGPS names it differently, its real plate
    (suggestions appear once the cameras have seen it).
-3. **Change the GoGPS password** (v1 published it in the page source), then update `GPS_PASSWORD` here and in the
-   notifier's `.env`, and restart both.
+3. **Change the GoGPS password** (v1 published it in the page source), then update `GPS_PASSWORD` here and restart.
 4. Phones: open the site, add it to the Home Screen (iPhone: Share → Add to Home Screen), Settings →
    Notifications → Turn on.
 5. Remove `OWNER_PASSWORD` from `.env`.
@@ -81,6 +79,36 @@ cp nginx.conf /etc/nginx/sites-available/tbb-gps.uz && ln -sf /etc/nginx/sites-a
    every 5 minutes, alerting to Telegram or SMS.
 7. Optional: set `SITE_ROUTER` in `.env` (a port the plant router itself answers on), so the app can tell
    "plant internet down" from "NVR off".
+
+## Moving the Telegram bot here
+
+Once, when the old Python bot in `/opt/tbb_car_notifier` hands over. Do it outside rush hours if you can; alerts for whatever passes
+meanwhile are sent afterwards (up to 6 h, marked late), none are lost, none go twice. Takes about 2 minutes.
+
+After `git pull` in `/root/gps`:
+
+```bash
+scripts/cutover-notifier.sh --check   # changes nothing: everything in place, and what would be imported
+```
+
+```bash
+scripts/cutover-notifier.sh           # stops the old bot, imports its state, starts the app with Telegram
+```
+
+Check: `docker compose logs --tail 50`, then `/holat` and `/oluvchilar` in the bot (the same group and user as before), and the next
+truck at the gate. Settings → System shows Telegram and the top views for the last 24 h.
+
+The old bot's folder stays as it was; keep it for a few days. **To go back:**
+
+```bash
+cd /root/gps && sed -i '/^TELEGRAM_BOT_TOKEN=/d;/^ADMIN_IDS=/d' .env && docker compose up -d
+```
+
+```bash
+cd /opt/tbb_car_notifier && docker compose start
+```
+
+The bot then catches up by itself (up to 6 h).
 
 ## Everyday
 

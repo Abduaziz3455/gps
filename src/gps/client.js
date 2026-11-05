@@ -102,9 +102,9 @@ class GpsClient {
   }
 
   moveStop(ids, from, to) { return this._period('/api/v3/vehicles/moveStop', ids, from, to); }
-  mileage(ids, from, to, sampling = 86400) { return this._period('/api/v3/vehicles/mileageAndMotohours', ids, from, to, { sampling }); }
-  fuel(ids, from, to, sampling = 86400) { return this._period('/api/v3/vehicles/fuelConsumption', ids, from, to, { sampling }); }
-  fuelInOut(ids, from, to) { return this._period('/api/v3/vehicles/fuelInOut', ids, from, to); }
+  mileage(ids, from, to, sampling = 86400, opts = {}) { return this._period('/api/v3/vehicles/mileageAndMotohours', ids, from, to, { sampling }, opts); }
+  fuel(ids, from, to, sampling = 86400, opts = {}) { return this._period('/api/v3/vehicles/fuelConsumption', ids, from, to, { sampling }, opts); }
+  fuelInOut(ids, from, to, opts = {}) { return this._period('/api/v3/vehicles/fuelInOut', ids, from, to, {}, opts); }
 }
 
 function asArray(payload) {

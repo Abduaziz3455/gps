@@ -162,4 +162,70 @@ class TestServer {
   clearFail() { fs.rmSync(path.join(this.dataDir, 'mock_fail'), { force: true }); }
 }
 
-module.exports = { TestServer, ACCOUNTS, REPO, tmpRoot, sandboxApp, cleanup, sleep, baseEnv };
+/**
+ * A stand-in for api.telegram.org: records every call, feeds commands in through getUpdates, and can be made to fail.
+ * Real Telegram is never contacted by the simulator suites.
+ */
+class FakeTelegram {
+  constructor() {
+    this.calls = [];
+    this.updates = [];
+    this.nextUpdate = 1000;
+    this.nextFile = 1;
+    this.down = false;
+    this.answer = null;
+  }
+  async start() {
+    const http = require('node:http');
+    this.server = http.createServer((req, res) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => this.handle(req, res, Buffer.concat(chunks)));
+    });
+    await new Promise((r) => this.server.listen(0, '127.0.0.1', r));
+    this.url = `http://127.0.0.1:${this.server.address().port}`;
+    return this;
+  }
+  handle(req, res, body) {
+    const method = req.url.split('/').pop();
+    if (this.down) return req.socket.destroy();
+    const raw = body.toString('latin1');
+    const fields = {};
+    if (/multipart/.test(req.headers['content-type'] || '')) {
+      for (const m of raw.matchAll(/name="(\w+)"\r\n\r\n([\s\S]*?)\r\n--/g)) fields[m[1]] = Buffer.from(m[2], 'latin1').toString('utf8');
+    } else Object.assign(fields, Object.fromEntries(new URLSearchParams(raw)));
+    const files = [...raw.matchAll(/name="(\w+)"; filename="([^"]+)"/g)].map((m) => m[2]);
+    const answer = (result) => res.end(JSON.stringify({ ok: true, result }));
+    const custom = this.answer?.(method, fields);
+    if (method !== 'getUpdates') this.calls.push({ method, fields, files, t: Date.now(), bytes: body.length });
+    if (custom) return res.end(JSON.stringify(custom));
+    if (method === 'getUpdates') {
+      this.lastOffset = Number(fields.offset) || null;
+      const send = () => { const u = this.updates.filter((x) => !this.lastOffset || x.update_id >= this.lastOffset); this.updates = []; answer(u); };
+      if (this.updates.length) return send();
+      const waited = setTimeout(send, 300);
+      return res.once('close', () => clearTimeout(waited));
+    }
+    if (method === 'getMe') return answer({ id: 1, is_bot: true, username: 'tbb_test_bot' });
+    if (method === 'sendPhoto') return answer({ photo: [{ file_id: 's' }, { file_id: `file${this.nextFile++}` }] });
+    if (method === 'sendMediaGroup') return answer(JSON.parse(fields.media).map(() => ({ photo: [{ file_id: 's' }, { file_id: `file${this.nextFile++}` }] })));
+    return answer(method === 'sendMessage' ? { message_id: 1 } : true);
+  }
+  /** Someone sends the bot a command. */
+  say(text, { user = 100, chat = 100, type = 'private', title } = {}) {
+    this.updates.push({ update_id: this.nextUpdate++, message: { text, from: { id: user }, chat: { id: chat, type, title } } });
+  }
+  sent(method) { return this.calls.filter((c) => c.method === method); }
+  /** Albums and single photos with their chat, caption and uploaded file count. */
+  alerts() {
+    const out = [];
+    for (const c of this.calls) {
+      if (c.method === 'sendMediaGroup') { const m = JSON.parse(c.fields.media); out.push({ chat: c.fields.chat_id, caption: m[0].caption, photos: m.length, uploaded: c.files.length, t: c.t }); }
+      if (c.method === 'sendPhoto') out.push({ chat: c.fields.chat_id, caption: c.fields.caption, photos: 1, uploaded: c.files.length, t: c.t });
+    }
+    return out;
+  }
+  async stop() { this.server.closeAllConnections(); await new Promise((r) => this.server.close(r)); }
+}
+
+module.exports = { FakeTelegram, TestServer, ACCOUNTS, REPO, tmpRoot, sandboxApp, cleanup, sleep, baseEnv };

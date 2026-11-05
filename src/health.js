@@ -164,6 +164,14 @@ class Health {
     this.timers = [];
     this.internetHosts = String(process.env.INTERNET_PROBES || '1.1.1.1:443,8.8.8.8:53').split(',').map((s) => parseHostPort(s.trim(), 443)).filter(Boolean);
     this.router = parseHostPort(process.env.SITE_ROUTER, 80);
+    this.checks = []; // other parts report their own problems here: () => [{key, part, severity, title, text}]
+    this.partLabels = new Map();
+  }
+
+  /** A part of the system that watches itself. Its problems are confirmed, reported and closed like any other. */
+  addCheck(part, label, fn) {
+    this.partLabels.set(part, label);
+    this.checks.push(fn);
   }
 
   async observe(now = Date.now()) {
@@ -231,6 +239,9 @@ class Health {
     const obs = await this.observe(now);
     this.last = obs;
     const problems = diagnose(obs);
+    for (const fn of this.checks) {
+      try { problems.push(...fn(now)); } catch (e) { this.log.warn?.(`health check: ${e.message}`); }
+    }
     const seen = new Set();
     for (const p of problems) {
       seen.add(p.key);
@@ -275,11 +286,11 @@ class Health {
 
   recover(p, since, end) {
     const mins = Math.max(1, Math.round((end - since) / 60e3));
-    const period = `${fmt(since)}–${fmt(end)} (${mins < 60 ? `${mins} daqiqa` : `${Math.floor(mins / 60)} soat ${mins % 60} daqiqa`})`;
+    const period = `${fmt(since, end)}–${fmt(end, end)} (${mins < 60 ? `${mins} daqiqa` : `${Math.floor(mins / 60)} soat ${mins % 60} daqiqa`})`;
     const extra = p.part === 'nvr' || p.part === 'site' || p.part === 'server'
       ? " Uzilish paytidagi darvoza o'tishlari kameralardan qayta yuklab olinadi (6 soatgacha)." : '';
     this.rules.raise({
-      key: `recovered:${p.key}:${since}`, type: 'system', severity: 'info', t: end, title: `✅ Tiklandi: ${PART_LABEL[p.part] || p.title}`,
+      key: `recovered:${p.key}:${since}`, type: 'system', severity: 'info', t: end, title: `✅ Tiklandi: ${PART_LABEL[p.part] || this.partLabels.get(p.part) || p.title}`,
       body: `${p.title} — muammo hal bo'ldi. Ishlamagan vaqt: ${period}.${extra}`, data: { part: p.part, problem: p.key, since, end, recovered: true },
     });
     // The problem is over: close its alert and the recovery note, so the bell only counts what is still wrong.
@@ -296,7 +307,7 @@ class Health {
       this.rules.raise({
         key: `system:server_down:${alive}`, type: 'system', severity: 'warning', t: now,
         title: 'Dispatcher tizimi ishlamay qoldi',
-        body: `Tizim ${fmt(alive)} dan ${fmt(now)} gacha (${mins} daqiqa) ishlamadi: server o'chgan, qayta yuklangan yoki dastur to'xtagan. Endi ishlayapti. Shu vaqtdagi darvoza o'tishlari kameralardan qayta yuklab olinadi (6 soatgacha).`,
+        body: `Tizim ${fmt(alive, now)} dan ${fmt(now, now)} gacha (${mins} daqiqa) ishlamadi: server o'chgan, qayta yuklangan yoki dastur to'xtagan. Endi ishlayapti. Shu vaqtdagi darvoza o'tishlari kameralardan qayta yuklab olinadi (6 soatgacha).`,
         data: { part: 'server', problem: 'server_down', since: alive, end: now },
       });
     }
@@ -319,6 +330,7 @@ class Health {
       item('nvr', 'Kamera tizimi (NVR)', activeParts.get('nvr'), 'Ishlayapti');
       item('camera', 'Kameralar', activeParts.get('camera'), 'Ishlayapti');
     }
+    for (const [part, label] of this.partLabels) item(part, label, activeParts.get(part), 'Ishlayapti');
     const problems = [...this.active.values()].filter((a) => a.raised).map((a) => ({ key: a.problem.key, part: a.problem.part, severity: a.problem.severity, title: a.problem.title, text: a.problem.text, since: a.since }));
     return { checkedAt: obs?.at || null, parts, problems };
   }
@@ -338,6 +350,7 @@ class Health {
   stop() { this.timers.forEach(clearTimeout); }
 }
 
-const fmt = (ms) => (T.dayOf(ms) === T.today() ? T.localIso(ms).slice(11, 16) : T.localIso(ms).slice(5, 16).replace('T', ' ').replace(/^(\d\d)-(\d\d)/, '$2.$1'));
+/** HH:MM, with the date when it isn't the same day as `now`. */
+const fmt = (ms, now = Date.now()) => (T.dayOf(ms) === T.dayOf(now) ? T.localIso(ms).slice(11, 16) : T.localIso(ms).slice(5, 16).replace('T', ' ').replace(/^(\d\d)-(\d\d)/, '$2.$1'));
 
 module.exports = { Health, diagnose, nvrErrorKind, gpsErrorKind, gpsFresh, tcpProbe, parseHostPort, CONFIRM_CHECKS };

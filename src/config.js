@@ -8,11 +8,19 @@ const env = process.env;
 const num = (v, d) => (v === undefined || v === '' || Number.isNaN(Number(v)) ? d : Number(v));
 const bool = (v, d) => (v === undefined || v === '' ? d : /^(1|true|yes|on)$/i.test(v));
 const ROOT = path.resolve(__dirname, '..');
+const list = (v) => [...new Set(String(v || '').split(',').map((x) => x.trim()).filter(Boolean))];
 
-/** Default cameras: the pairing verified on 12 Oct 2026 (tbb_car_notifier/docs/site-survey.md). */
+/**
+ * Default cameras: the pairing verified on 12 Oct 2026 (docs/site-survey.md), the top views measured on 5 Nov 2026 (docs/ARCHITECTURE.md, 2a).
+ * topView: seconds around the plate capture to read from the overview camera's recording, where the vehicle is
+ * expected (`expect`), and the part of the picture a vehicle on this lane covers (fractions of width and height).
+ * Yo'l-2's picture also holds the public road on the upper left, whose traffic must not count.
+ */
 const DEFAULT_CAMERAS = [
-  { channel: 4, name: 'ANPR-1', direction: 'in', contextChannel: 5, contextName: "Yo'l-2" },
-  { channel: 3, name: 'ANPR-2', direction: 'out', contextChannel: 6, contextName: "Yo'l-1" },
+  { channel: 4, name: 'ANPR-1', direction: 'in', contextChannel: 5, contextName: "Yo'l-2",
+    topView: { from: -16, to: 20, expect: 1, lane: [[0, 0.6], [0.46, 0], [0.74, 0], [0.74, 1], [0, 1]] } },
+  { channel: 3, name: 'ANPR-2', direction: 'out', contextChannel: 6, contextName: "Yo'l-1",
+    topView: { from: -30, to: 4, expect: -12, lane: [[0, 0.35], [1, 0.35], [1, 1], [0, 1]] } },
 ];
 
 function parseCameras(text) {
@@ -25,6 +33,7 @@ function parseCameras(text) {
     direction: c.direction === 'out' ? 'out' : 'in',
     contextChannel: c.contextChannel ? Number(c.contextChannel) : null,
     contextName: c.contextName || null,
+    topView: c.topView || null,
   }));
 }
 
@@ -73,6 +82,21 @@ const config = {
     matchBeforeSec: num(env.MATCH_BEFORE_SECONDS, 45),
     matchAfterSec: num(env.MATCH_AFTER_SECONDS, 90),
     keepPhotosDays: num(env.KEEP_PHOTOS_DAYS, 90),
+    rtspPort: num(env.NVR_RTSP_PORT, 554),
+    topViewEnabled: bool(env.TOP_VIEW, true),
+    topViewWorkers: num(env.TOP_VIEW_WORKERS, 2),
+    ffmpeg: env.FFMPEG_PATH || 'ffmpeg',
+    ffprobe: env.FFPROBE_PATH || 'ffprobe',
+  },
+
+  telegram: {
+    token: env.TELEGRAM_BOT_TOKEN || '',
+    apiBase: (env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/$/, ''),
+    chatIds: list(env.TELEGRAM_CHAT_IDS),     // alert recipients from the environment, besides those added with /ulash and /qoshish
+    adminIds: list(env.ADMIN_IDS),            // the only users whose commands work; they get reports and health messages
+    allVehicles: bool(env.TELEGRAM_ALL_VEHICLES, true), // false: alerts for GPS vehicles only
+    reportTime: env.REPORT_TIME === undefined ? '22:00' : env.REPORT_TIME, // daily report; empty turns it off
+    reportTo: env.REPORT_TO || 'groups',      // admins | groups (admins + alert groups) | all (+ users)
   },
 
   tiles: { url: env.TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' },
@@ -90,5 +114,6 @@ const config = {
 
 config.gps.enabled = Boolean(config.gps.login && config.gps.password) || config.mock;
 config.nvr.enabled = Boolean(config.nvr.host && config.nvr.password) || config.mock;
+config.telegram.enabled = Boolean(config.telegram.token);
 
 module.exports = config;

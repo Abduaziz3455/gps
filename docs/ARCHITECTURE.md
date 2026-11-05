@@ -1,10 +1,9 @@
 # TBB Dispatcher v2: architecture
 
-Status: 3 Nov 2026. Replaces the single-file dashboard (`fleet-dashboard.html`) with a server-backed
+Status: 5 Nov 2026. Replaces the single-file dashboard (`fleet-dashboard.html`) with a server-backed
 application that joins the **GPS fleet** (GoGPS, `baku.gps.az`) with the **gate cameras** (Hikvision NVR
-with two ANPR cameras at the plant's entry and exit). Everything lives in this repository. The Telegram
-notifier (`tbb_car_notifier`) is not changed and keeps running on its own server; both read the same NVR
-and the same GPS account independently.
+with two ANPR cameras at the plant's entry and exit). Everything lives in this repository, including the Telegram
+bot, which used to be a separate Python program (`tbb_car_notifier`, section 7b).
 
 ## 1. Why a rewrite
 
@@ -66,9 +65,36 @@ Combining them (each gate event is resolved 90 s after the capture, when GPS has
 | `GET /ISAPI/Event/notification/alertStream` | always connected; an ANPR event triggers a capture search on that camera |
 | `POST /ISAPI/ContentMgmt/search` | on events, every 60 s as fallback, at start-up (catch-up), once for history (`CAMERA_BACKFILL_DAYS`, default 30, records only) |
 | capture image, overview snapshot | right after a live event (the snapshot only shows the truck for ~1–2 min); history photos are fetched the first time someone opens them, then cached |
+| recording of the overview camera, RTSP port 554 | the top view (section 2a), once a capture's recording is playable |
 
-The notifier's "top view from the recording" (RTSP decode, ~180 MB RAM per frame) is not ported: the live
-overview snapshot is attached instead.
+**An exit is vetoed only if the truck didn't move.** Standing in the yard circle 5 minutes after the exit camera isn't enough:
+trucks often pass the camera and stand inside the circle for minutes, and a standing tracker reports rarely. On 5 Nov 2026
+the first rule vetoed 7 of 18 real exits (the plate photo shows the truck leaving; GPS shows 69–228 m of movement or a late
+crossing), while maneuvers moved 0–30 m. Now: confirmed if it crossed the boundary within the 5 minutes; vetoed if it moved
+under 50 m from 2 min before to 5 min after the capture; otherwise unconfirmed, and it counts as a trip.
+
+## 2a. Top view: the photo that shows the load
+
+The overview cameras look down on the lane, but a live snapshot comes too late: by the time the event arrives the truck has
+passed. So the picture comes from the camera's recording (`src/cameras/topview.js`). Everything below was measured on
+5 Nov 2026 on 54 real captures, by comparing the frames with what the old bot sent. The old bot was right on most, and on
+about one entry in four it sent an empty lane, a truck still far away, or the next truck.
+
+| What the recordings showed | What the code does |
+|---|---|
+| The truck passes at very different moments: entries from before the capture to +6 s, exits −18…−4 s | Reads a wide window (entry −16…+20 s, exit −30…+4 s) and finds the moment in it |
+| Often the truck is already in the first frame. Comparing with that frame makes the empty lane the "biggest change" (this was the empty pictures) | The background is the median of all frames: a truck covers a spot only briefly, and a truck standing still doesn't hide the next one |
+| The window can hold the truck before or behind (at 15:32:00 the next truck's cab was sent) | Trucks are separate passes; the pass nearest the expected moment is taken |
+| Sand or a tarpaulin on grey road is close in brightness, so the bed scores far below a bright cab | Compares colour. While the truck keeps driving forward, the frame after the cab is taken |
+| Mixers often reverse through the picture | Forward is checked: for a reversing truck the frame near the best stays |
+| Yo'l-2 also sees the public road | Only the lane counts (a polygon per camera, `topView.lane` in `src/config.js`) |
+| Nothing there | Nothing is sent as if it showed the truck. The alert goes with the capture image and the live snapshot, if any |
+| The NVR sometimes ends a stream early, without an error | A short read is tried again (3 tries) |
+| Key frames every 2 s; the recording is served in real time, only the main stream is recorded | Key frames only: a fifth of the CPU of a full decode. Two reads at once peak at 167 MB in the production image |
+| The NVR makes a recording playable in 2-minute steps, answering 400 before that | Asks every 15 s, up to 4 minutes past the end of the window |
+
+ffmpeg runs as its own process: if it crashes or hangs, one picture is lost, not the server. At most `TOP_VIEW_WORKERS` (2) read
+at once. Each event's state is in `gate_events.top_view`, so a restart carries on, and a failing camera shows up in system health.
 
 ## 3. Server modules
 
@@ -83,6 +109,11 @@ overview snapshot is attached instead.
 | `src/places.js` | Named places on the map and the visits (reys) to them (section 6a) |
 | `src/rules.js` | Alert rules (section 7) |
 | `src/push.js` | Web Push subscriptions, per-device preferences, delivery, dead-subscription cleanup |
+| `src/cameras/topview.js` | The photo with the load, from the recording (section 2a) |
+| `src/notify/outbox.js` | Durable delivery queue, per recipient. A new channel is one `register()` |
+| `src/telegram/*` | The bot: API client, commands, recipients, alert format, scheduled reports (section 7b) |
+| `src/reports.js` | Daily and monthly report, the yard and the camera-vs-GPS check as text |
+| `src/gatedetails.js` | What GPS adds to a gate event: crossing, trip, fuel, today's km, odometer |
 | `src/sse.js` | Live stream to browsers: positions, gate events, alerts, system health |
 | `src/auth.js` | Users, roles, password hashing (scrypt), sessions (HttpOnly cookie), login throttling |
 | `src/api.js` | JSON API with role checks |
@@ -102,7 +133,9 @@ overview snapshot is attached instead.
 | `places`, `place_visits` | | areas the owner named, and the stays in them, worked out from `positions` |
 | `alerts` | | rule hits; acknowledged by a dispatcher |
 | `push_subscriptions` | | per device: endpoint, keys, preferences |
-| `kv` | | VAPID keys, health, last rollups |
+| `outbox` | | what is being delivered, one row per recipient |
+| `tg_recipients`, `tg_alerts` | | chats added with commands; each alert's text and Telegram's copies of its photos |
+| `kv` | | VAPID keys, health, last rollups, Telegram offset and report marks |
 
 ### Rollups
 
@@ -268,6 +301,43 @@ When this server is completely down nobody inside it can send anything: an outsi
 field is true only if GoGPS answered within the last three polls and a minute (90 s at the usual 10 s poll). Its
 `nvr` field still only says the NVR has answered at least once since the start.
 
+## 7b. Telegram
+
+The bot was a separate Python program reading the same NVR and GPS account. It is now part of this app. There is one gate
+pipeline: the same events, decisions and photos reach the web page, the phone and Telegram.
+
+```
+capture → tracker → gate event ─┬─ 'gate' (page, push: entries at once)
+                                ├─ GPS resolution ── top view ── 'gate:final' ──┐
+                                                                                ├─ outbox ── Telegram
+ health ('alert', system) · schedule (22:00, month end) · commands ─────────────┘
+```
+
+**How it is built to grow.** Each piece has one job and knows little of the others:
+
+| To add | Do this |
+|---|---|
+| A bot command | One line in `src/telegram/commands.js`: name, who may use it, what it runs |
+| A delivery channel (SMS, e-mail, ...) | `outbox.register('sms', send)` and subscribe to the bus. Queueing, retries and give-ups are there |
+| Another reaction to a finished gate event | `bus.on('gate:final', ...)`. Writing to the database there joins the transaction that marks the event done |
+| A self-check | `health.addCheck(part, label, fn)`: confirmation, recovery message and the Settings row come with it |
+| A camera or different lane | `topView` on the camera (`CAMERAS_JSON`) |
+
+**Exactly once.** An event is marked final and its deliveries queued in one transaction, each delivery with its own dedupe key.
+Reports are queued together with their day's mark. So a crash can delay a message but neither lose nor repeat it. All pending work
+(top views, finals, deliveries) lives in the database and carries on after a restart.
+
+**Timing.** As with the old bot, an alert goes out when the top view is ready: 1.5–3 min after the capture, because the NVR makes
+the recording playable in 2-minute steps. An exit whose truck hasn't moved 50 m yet waits up to 5 minutes for the veto; one that
+has goes out right away. Later than 6 min, the alert says it is late. After an outage, events up to `CAMERA_CATCHUP_HOURS` (6) old are still alerted, marked late.
+
+**Reports come from `daily_stats`**, the same numbers as the Hisobot page: `/bugun` refreshes today's first, `/oy` takes a second
+instead of minutes. A vehicle's trips are `max(exits, entries)`, as everywhere in the app: the exit camera misses more plates.
+
+**Moving from the old bot:** `scripts/import-notifier.js` and START_PROJECT.md. Its learned aliases are not imported, on purpose: the
+evidence is noisy (it maps 10834HDA to the GPS vehicle named 10 870 HAD). Mixers are matched by the app's own "same digits and
+letters" rule, which also gives them GPS details the old bot lacked.
+
 ### Map tiles must not hold up the GPS polls
 
 On 5 Nov 2026 live GPS stopped for 12 minutes while the map was in heavy use, although GoGPS and our internet were
@@ -291,9 +361,11 @@ timed out behind them, for minutes after the tile requests had stopped. Three th
 - The first owner account comes from `OWNER_USERNAME` / `OWNER_PASSWORD` on the first start; more with
   `npm run user`.
 
+- The bot token and the RTSP login are server-only. Neither appears in logs or error messages: Telegram errors are reduced to a code,
+  ffmpeg's messages have the URL removed.
+
 **Action needed:** the live site has been publishing the GoGPS password in its HTML. Change the GoGPS
-password after v2 is deployed (and in the notifier's `.env`, which uses the same account). If the NVR's
-port is restricted to the notifier server's IP (planned in the notifier's TODO), also allow 5.182.26.55.
+password after v2 is deployed. The NVR's ports 8008 and 554 are open to the internet: restrict them on the site router to 5.182.26.55.
 
 ## 9. Rollout
 

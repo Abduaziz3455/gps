@@ -287,6 +287,20 @@ class MockNvr {
   }
 }
 
+/** Fake top view: same interface as src/cameras/topview.js, no recording to read. */
+class MockTopView {
+  constructor({ dataDir = '' } = {}) { this.dataDir = dataDir; this.calls = 0; }
+  async ready() { return mockFail(this.dataDir) !== 'top_view_late'; }
+  async grab(cam, captureMs) {
+    const f = mockFail(this.dataDir);
+    if (f === 'top_view_broken') throw new Error('ffmpeg exit 1');
+    if (f === 'top_view_empty') return { jpeg: null, frames: 18, passes: 0 };
+    this.calls++;
+    return { jpeg: await image('', `${cam.contextName} · TOP VIEW · ${T.localIso(captureMs).replace('T', ' ')}`, false), share: 0.3, t: cam.topView.expect || 0, frames: 18, passes: 1 };
+  }
+  stop() {}
+}
+
 let sharp = null;
 try { sharp = require('sharp'); } catch { /* optional */ }
 const TINY_JPEG = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
@@ -312,4 +326,4 @@ async function image(plate, caption, anpr) {
 /** Starting vehicle types for the demo database. */
 const MOCK_TYPES = { 22077: 'dump', 22078: 'dump', 21389: 'dump', 22238: 'dump', 22871: 'dump', 21390: 'dump', 22872: 'excavator' };
 
-module.exports = { Sim, MockGps, MockNvr, MOCK_TYPES, FLEET, mockFail };
+module.exports = { Sim, MockGps, MockNvr, MockTopView, MOCK_TYPES, FLEET, mockFail };

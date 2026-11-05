@@ -22,6 +22,7 @@ const { Places } = require('./src/places');
 const { Rules } = require('./src/rules');
 const { Push } = require('./src/push');
 const { Health, gpsFresh } = require('./src/health');
+const { Outbox } = require('./src/notify/outbox');
 const { buildApi, apiHandler } = require('./src/api');
 const { serveFile, securityHeaders, json } = require('./src/http');
 
@@ -45,12 +46,13 @@ function build() {
   const auth = new Auth({ h, config });
   auth.ensureOwner(log);
 
-  let gps = null, nvr = null, sim = null;
+  let gps = null, nvr = null, sim = null, topView = null;
   if (config.mock) {
-    const { Sim, MockGps, MockNvr, MOCK_TYPES } = require('./src/mock/sim');
+    const { Sim, MockGps, MockNvr, MockTopView, MOCK_TYPES } = require('./src/mock/sim');
     sim = new Sim({ yard: config.yard });
     gps = new MockGps({ sim, dataDir: config.dataDir });
     nvr = new MockNvr({ sim, cameras: config.nvr.cameras, dataDir: config.dataDir });
+    if (config.nvr.topViewEnabled) topView = new MockTopView({ dataDir: config.dataDir });
     log.warn('MOCK mode: simulated GPS and cameras (demo data)');
     ctxSeed = { MOCK_TYPES };
   } else {
@@ -59,6 +61,10 @@ function build() {
     if (config.nvr.enabled) {
       const { NVR } = require('./src/cameras/hikvision');
       nvr = new NVR({ host: config.nvr.host, user: config.nvr.user, password: config.nvr.password, tzOffsetMin: config.tzOffsetMin });
+      if (config.nvr.topViewEnabled) {
+        const { TopView } = require('./src/cameras/topview');
+        topView = new TopView({ host: config.nvr.host, user: config.nvr.user, password: config.nvr.password, rtspPort: config.nvr.rtspPort, tzOffsetMin: config.tzOffsetMin, ffmpeg: config.nvr.ffmpeg, ffprobe: config.nvr.ffprobe, log });
+      }
     } else log.warn('NVR_HOST / NVR_PASSWORD not set: gate cameras are off');
   }
 
@@ -73,7 +79,7 @@ function build() {
       samePassWindowMs: config.nvr.samePassWindowSec * 1000,
       fleetPlates: () => (gateRef ? gateRef.fleetPlates() : []),
     });
-    gate = gateRef = new Gate({ h, nvr, poller, config, tracker, plates, log });
+    gate = gateRef = new Gate({ h, nvr, poller, config, tracker, plates, topView, log });
   }
   const analytics = new Analytics({ h, gps, config, log });
   const places = new Places({ h, config, log });
@@ -82,7 +88,12 @@ function build() {
   // In MOCK mode the internet probe is simulated too (see src/mock/sim.js mockFail).
   const probe = config.mock ? async () => ({ ok: require('./src/mock/sim').mockFail(config.dataDir) !== 'internet' }) : undefined;
   const health = new Health({ h, config, poller, gate, rules, log, ...(probe ? { probe } : {}) });
-  const ctx = { h, db, config, auth, gps, nvr, poller, gate, analytics, places, rules, push, health, sim, log };
+  const outbox = new Outbox({ h, log });
+  const ctx = { h, db, config, auth, gps, nvr, poller, gate, analytics, places, rules, push, health, sim, outbox, log };
+  if (config.telegram.enabled) {
+    const { Telegram } = require('./src/telegram');
+    ctx.telegram = new Telegram(ctx);
+  } else log.warn('TELEGRAM_BOT_TOKEN not set: Telegram alerts and commands are off');
   return ctx;
 }
 
@@ -90,7 +101,7 @@ let ctxSeed = null;
 
 async function start() {
   const ctx = build();
-  const { config: cfg, poller, gate, analytics, places, rules, push, health, h } = ctx;
+  const { config: cfg, poller, gate, analytics, places, rules, push, health, h, outbox, telegram } = ctx;
   const api = apiHandler(ctx, buildApi(ctx));
   const publicDir = path.join(__dirname, 'public');
   const leafletDir = path.join(__dirname, 'node_modules', 'leaflet', 'dist');
@@ -138,6 +149,8 @@ async function start() {
   if (poller) poller.start();
   analytics.start();
   places.start();
+  outbox.start();
+  telegram?.start();
   if (gate) {
     // Camera history arrived after the first rollups: recompute the camera columns of those days.
     bus.on('gate:history', async ({ since }) => {
@@ -155,7 +168,7 @@ async function start() {
 
   const shutdown = (sig) => {
     log.info(`${sig}: shutting down`);
-    poller?.stop(); gate?.stop(); analytics.stop(); places.stop(); rules.stop(); health.stop();
+    poller?.stop(); gate?.stop(); analytics.stop(); places.stop(); rules.stop(); health.stop(); outbox.stop(); telegram?.stop();
     h.kvSet('alive_at', Date.now()); // the outage report after restart counts from this moment
     server.close(() => { ctx.db.close(); process.exit(0); });
     setTimeout(() => process.exit(0), 5000).unref();

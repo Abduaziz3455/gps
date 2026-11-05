@@ -76,4 +76,15 @@ function parseHm(s) {
   return h * 60 + (m || 0);
 }
 
-module.exports = { DAY, dayOf, dayStart, isDay, addDays, today, daysBetween, localIso, parseApiTime, hourOf, weekdayOf, minuteOfDay, parseHm };
+/** HH:MM. */
+function hm(ms) {
+  return localIso(ms).slice(11, 16);
+}
+
+/** HH:MM, with the date when it isn't the same day as `ref`. */
+function hmOn(ms, ref) {
+  const s = localIso(ms);
+  return dayOf(ms) === dayOf(ref) ? s.slice(11, 16) : `${s.slice(8, 10)}.${s.slice(5, 7)} ${s.slice(11, 16)}`;
+}
+
+module.exports = { hm, hmOn, DAY, dayOf, dayStart, isDay, addDays, today, daysBetween, localIso, parseApiTime, hourOf, weekdayOf, minuteOfDay, parseHm };

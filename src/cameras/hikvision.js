@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Hikvision NVR client (ISAPI over HTTP digest auth). Port of the notifier's hikvision.py.
+ * Hikvision NVR client (ISAPI over HTTP digest auth). 
  *
  * Time: the NVR stores *local* time (Asia/Tashkent, UTC+5, no DST) but labels it "Z". Everything this
  * module hands out or takes is epoch milliseconds of the real instant; the conversion happens only at

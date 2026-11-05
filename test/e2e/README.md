@@ -16,7 +16,7 @@ About 5 minutes. Safe to run anywhere, at any time.
 | `api` | Every route: who may call it, inputs, limits, calculations, push, live stream, static files |
 | `ui` | Every page in Chromium, as owner and as dispatcher |
 | `mobile` | The main tasks by touch on a phone |
-| `resilience` | Malformed requests, each kind of outage and its recovery, restarts, first run, production settings, the `npm run user` tool, losing the connection |
+| `resilience` | Malformed requests, each kind of outage and its recovery, restarts, first run, production settings, the `npm run user` tool, losing the connection, and Telegram against a fake API: capture to delivered album, commands, Telegram outages, taking over from the old bot |
 | `firefox`, `webkit`, `iphone` | The main path on the other browser engines |
 
 How it is kept safe and repeatable:

@@ -1,7 +1,8 @@
 # TBB Dispatcher
 
 Fleet control for the TBB concrete plant: a live map of every truck (GoGPS), the gate cameras (Hikvision ANPR:
-who came in, who left, with photos), analytics for the owner, and push notifications on phones.
+who came in, who left, with a photo of the plate and one from above showing the load), analytics for the owner, push
+notifications on phones, and the Telegram bot.
 
 Design and reasoning: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Deployment: [START_PROJECT.md](START_PROJECT.md).
 
@@ -33,8 +34,11 @@ One Node 22 process (`server.js`), SQLite (`node:sqlite`), plain ES modules in t
 ```
 server.js            wiring + static files
 src/gps/             GoGPS client (1 req/s queue), normalisation, live poller (positions, yard visits)
-src/cameras/         NVR client (digest auth), plate rules and in/out tracker (ported from tbb_car_notifier)
+src/cameras/         NVR client (digest auth), plate rules, in/out tracker, top view from the recording (ffmpeg)
 src/gate.js          camera pipeline: captures -> gate events -> GPS confirm/identify -> photos -> notify
+src/notify/          durable delivery queue, one row per recipient, for any channel
+src/telegram/        the bot: client, commands, recipients, alert format, scheduled reports
+src/reports.js       daily / monthly report, yard and camera-vs-GPS check as text
 src/analytics.js     daily per-vehicle rollups + analytics queries
 src/rules.js         alert rules        src/push.js   Web Push        src/auth.js   users, roles, sessions
 src/api.js           JSON API + live stream (SSE)
@@ -64,7 +68,17 @@ Against the real systems: copy `.env.example` to `.env`, fill in GPS, NVR and th
 npm test
 ```
 
-## The Telegram notifier
+## Telegram
 
-`tbb_car_notifier` keeps running unchanged on its own server and keeps sending Telegram alerts. This app reads
-the same NVR and GoGPS account independently.
+With `TELEGRAM_BOT_TOKEN` and `ADMIN_IDS` in `.env`, every entry and exit goes to the recipients with the plate photo and the top view.
+
+| Who | How | Gets |
+|---|---|---|
+| Groups | add the bot, an admin sends `/ulash@<bot>` there (`/uzish` stops it) | alerts, the 22:00 and month-end reports, outage messages; everyone in the group can use `/bugun`, `/kecha`, `/hovli` |
+| Users | they press Start, an admin sends `/qoshish <id>` (`/uzish <id>`), or `TELEGRAM_CHAT_IDS` | alerts |
+| Admins | `ADMIN_IDS` | all commands, reports and every health message |
+
+Commands: `/bugun` `/kecha` `/oy` `/hovli` `/tekshir` `/holat` `/oluvchilar` `/ulash` `/uzish` `/qoshish` `/yordam` `/id`.
+
+Only one program may use a bot token at a time; the app reports it in system health if another one does. ffmpeg must be installed
+for the top view (the Docker image has it). Without it, alerts go with the other photos.
