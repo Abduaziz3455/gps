@@ -38,7 +38,8 @@ src/gate.js          camera pipeline: captures -> gate events -> GPS confirm/ide
 src/analytics.js     daily per-vehicle rollups + analytics queries
 src/rules.js         alert rules        src/push.js   Web Push        src/auth.js   users, roles, sessions
 src/api.js           JSON API + live stream (SSE)
-src/tiles.js         map tiles: this server fetches them from OpenStreetMap for the browser
+src/tiles.js         map tiles: this server fetches them from OpenStreetMap for the browser, a few at a time
+src/dnscache.js      remembered DNS answers, so a burst to one host can't hold up the others
 public/              the app (index.html, css/, js/pages/*, sw.js)
 src/mock/sim.js      simulated GPS + NVR for development (MOCK=1)
 ```

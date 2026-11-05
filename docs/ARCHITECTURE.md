@@ -264,6 +264,24 @@ aloqa yo'q"). System messages go to everyone and ignore quiet hours (per-device 
 When this server is completely down nobody inside it can send anything: an outside uptime check on
 `https://tbb-gps.uz/health` (START_PROJECT.md) covers that.
 
+`/health` always answers 200 while the process runs, so a GPS outage never makes Docker restart the app. Its `gps`
+field is true only if GoGPS answered within the last three polls and a minute (90 s at the usual 10 s poll). Its
+`nvr` field still only says the NVR has answered at least once since the start.
+
+### Map tiles must not hold up the GPS polls
+
+On 5 Nov 2026 live GPS stopped for 12 minutes while the map was in heavy use, although GoGPS and our internet were
+fine. Node resolves hosts at most 2 at a time, in one queue, and a request that gives up leaves its lookup in that
+queue. Each tile could open a new connection, so about 2,300 tiles queued lookups at 570 ms each and the GPS polls
+timed out behind them, for minutes after the tile requests had stopped. Three things prevent it now:
+
+- `src/tiles.js`: at most 6 requests to the tile server at a time. Up to 200 wait for at most 10 s, then get a 503 and
+  the map asks again. A tile the browser no longer wants leaves the line.
+- `src/dnscache.js`: one lookup per host at a time. A known answer is used at once and refreshed in the background
+  after 60 s; after an hour the resolver is waited for. If the resolver fails, the last answer keeps working.
+- `docker-compose.yml`: the container uses 1.1.1.1 and 8.8.8.8 (about 60 ms) instead of the machine's Tailscale
+  resolver (about 560 ms). The app has no Tailscale names to resolve; if one is ever added, this has to change.
+
 ## 8. Security
 
 - GPS and NVR credentials, VAPID private key: server environment / database only. Nothing secret in the page.

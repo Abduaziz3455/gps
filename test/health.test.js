@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const config = require('../src/config');
 const { open, helpers } = require('../src/db');
 const { Rules } = require('../src/rules');
-const { Health, diagnose, nvrErrorKind, gpsErrorKind, parseHostPort } = require('../src/health');
+const { Health, diagnose, nvrErrorKind, gpsErrorKind, gpsFresh, parseHostPort } = require('../src/health');
 
 const ok = { internet: true, gps: { ok: true }, nvr: { ok: true }, router: null, cameras: [], diskFreeBytes: 50 * 1024 ** 3, diskFreeShare: 0.5 };
 const keys = (obs) => diagnose({ ...ok, ...obs }).map((p) => p.key);
@@ -91,4 +91,13 @@ test('our own downtime is reported after a restart', () => {
   const a = h.get('SELECT * FROM alerts');
   assert.equal(a.title, 'Dispatcher tizimi ishlamay qoldi');
   assert.match(a.body, /10:00 dan 10:20 gacha \(20 daqiqa\)/);
+});
+
+test('gpsFresh: GoGPS answered lately; never answered, or silent for three polls and a minute, is not fresh', () => {
+  const now = 1_000_000;
+  assert.equal(gpsFresh(0, 10, now), false, 'no answer since the start');
+  assert.equal(gpsFresh(now - 89_000, 10, now), true);
+  assert.equal(gpsFresh(now - 90_000, 10, now), false);
+  assert.equal(gpsFresh(now - 200_000, 60, now), true, 'a slower poll gets more time');
+  assert.equal(gpsFresh(now - 240_000, 60, now), false);
 });

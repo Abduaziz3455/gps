@@ -68,6 +68,11 @@ function nvrErrorKind(e) {
 }
 
 /** GPS error text -> kind. */
+/** Has GoGPS answered lately? Three missed polls and a minute of slack. */
+function gpsFresh(lastOk, pollSeconds, now = Date.now()) {
+  return !!lastOk && now - lastOk < 3 * Math.max(10e3, pollSeconds * 1000) + 60e3;
+}
+
 function gpsErrorKind(msg) {
   if (!msg) return null;
   if (/login failed|not authorized|HTTP 401|HTTP 403/i.test(msg)) return 'auth';
@@ -166,8 +171,8 @@ class Health {
     const results = await Promise.all(this.internetHosts.map((x) => this.probe(x.host, x.port, 5000)));
     obs.internet = results.some((r) => r.ok);
     if (this.poller) {
-      const fresh = this.poller.lastOk && now - this.poller.lastOk < 3 * Math.max(10e3, this.cfg.gps.pollSeconds * 1000) + 60e3;
-      obs.gps = { ok: !!fresh || (!this.poller.lastError && now - (this.started || now) < 3 * 60e3), error: this.poller.lastError, lastOk: this.poller.lastOk };
+      const fresh = gpsFresh(this.poller.lastOk, this.cfg.gps.pollSeconds, now);
+      obs.gps = { ok: fresh || (!this.poller.lastError && now - (this.started || now) < 3 * 60e3), error: this.poller.lastError, lastOk: this.poller.lastOk };
     } else obs.gps = null;
     if (this.gate) {
       const nvr = this.gate.nvr;
@@ -335,4 +340,4 @@ class Health {
 
 const fmt = (ms) => (T.dayOf(ms) === T.today() ? T.localIso(ms).slice(11, 16) : T.localIso(ms).slice(5, 16).replace('T', ' ').replace(/^(\d\d)-(\d\d)/, '$2.$1'));
 
-module.exports = { Health, diagnose, nvrErrorKind, gpsErrorKind, tcpProbe, parseHostPort, CONFIRM_CHECKS };
+module.exports = { Health, diagnose, nvrErrorKind, gpsErrorKind, gpsFresh, tcpProbe, parseHostPort, CONFIRM_CHECKS };

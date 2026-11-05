@@ -9,6 +9,7 @@ const http = require('node:http');
 
 loadEnv(path.join(__dirname, '.env'));
 
+require('./src/dnscache').install();
 const config = require('./src/config');
 const bus = require('./src/bus');
 const { open, helpers } = require('./src/db');
@@ -20,7 +21,7 @@ const { Analytics } = require('./src/analytics');
 const { Places } = require('./src/places');
 const { Rules } = require('./src/rules');
 const { Push } = require('./src/push');
-const { Health } = require('./src/health');
+const { Health, gpsFresh } = require('./src/health');
 const { buildApi, apiHandler } = require('./src/api');
 const { serveFile, securityHeaders, json } = require('./src/http');
 
@@ -101,7 +102,7 @@ async function start() {
     let url;
     try { url = new URL(req.url, 'http://local'); } catch { return badRequest(res); }
     if (url.pathname === '/health' || url.pathname === '/healthz') {
-      return json(res, 200, { status: 'ok', version, uptime: Math.round(process.uptime()), gps: poller ? !!poller.lastOk : null, nvr: gate ? !!gate.nvr.lastOk : null });
+      return json(res, 200, { status: 'ok', version, uptime: Math.round(process.uptime()), gps: poller ? gpsFresh(poller.lastOk, cfg.gps.pollSeconds) : null, nvr: gate ? !!gate.nvr.lastOk : null });
     }
     if (url.pathname.startsWith('/api/')) return api(req, res, url);
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.statusCode = 405; return res.end(); }

@@ -13,6 +13,9 @@ services:
       - TZ=Asia/Tashkent
     volumes:
       - ./data:/app/data             # dispatcher.db + photos/ (owned by uid 1000: sudo chown -R 1000:1000 data)
+    dns:                             # this machine's own resolver (Tailscale) takes 560 ms an answer, these 60 ms
+      - 1.1.1.1
+      - 8.8.8.8
     mem_limit: 512m
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]

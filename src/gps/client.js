@@ -68,7 +68,7 @@ class GpsClient {
         } catch (e) {
           if (e.permanent || attempt >= retries) {
             this.lastError = e.message || String(e);
-            throw e instanceof GpsError ? e : new GpsError(`${path}: ${e.name === 'TimeoutError' ? 'timeout' : e.message}`);
+            throw e instanceof GpsError ? e : new GpsError(`${path}: ${e.name === 'TimeoutError' ? 'timeout' : e.message}${e.cause?.code ? ` (${e.cause.code})` : ''}`);
           }
           await sleep(delay);
           delay *= 2;
