@@ -45,10 +45,12 @@ function setup() {
   /** A regular: `days` days of an exit and an entry. */
   const regular = (plate, days = 3) => {
     const ts = [];
+    // Midday, so an exit and its entry are on one day whatever time the tests run.
+    const noon = T.dayStart(T.dayOf(NOW)) + 12 * HOUR;
     for (let d = 1; d <= days; d++) {
-      ts.push(NOW - d * DAY, NOW - d * DAY + HOUR);
-      pass(plate, NOW - d * DAY, 'out');
-      pass(plate, NOW - d * DAY + HOUR, 'in');
+      ts.push(noon - d * DAY, noon - d * DAY + HOUR);
+      pass(plate, noon - d * DAY, 'out');
+      pass(plate, noon - d * DAY + HOUR, 'in');
     }
     return ts;
   };
@@ -112,7 +114,9 @@ function streetSetup(passDays = 6) {
     seg(3, NOW - i * HOUR, NOW - i * HOUR + 10 * 60e3, PLANT_STREET);
     s.h.run("INSERT OR IGNORE INTO positions (vehicle_id, t, lat, lng, speed, course, status) VALUES (3, ?, ?, ?, 0, 0, 'stopped')", NOW - i * HOUR + 60e3, YARD.lat, YARD.lng);
   }
-  return { ...s, seg, ts: s.regular('10963DDA', passDays) };
+  const ts = s.regular('10963DDA', passDays);
+  for (const t of [NOW, ...ts]) s.h.run('INSERT OR REPLACE INTO gps_segment_days (day, synced_at) VALUES (?, ?)', T.dayOf(t), NOW);
+  return { ...s, seg, ts };
 }
 const PLANT_STREET = 'Уйсозлар 2-й проезд, Ташкент, Узбекистан';
 
@@ -145,6 +149,21 @@ test('real: 10834HDA, best fit 43 of 60: may have no tracker, and no truck is su
   assert.equal(r.evidence.noGps, true);
 });
 
+test('real: while history is still being fetched, passes on days not fetched yet say nothing about a truck', () => {
+  const s = streetSetup();
+  for (const t of s.ts) s.seg(1, t - 60e3, t + 60e3, PLANT_STREET);
+  // Only the newest day is in: 2 of 12 passes. Counted as misses, this read "may have no tracker" for 10963DDA on 5 Nov.
+  s.h.run('DELETE FROM gps_segment_days');
+  s.h.run('INSERT INTO gps_segment_days (day, synced_at) VALUES (?, ?)', T.dayOf(s.ts[0]), NOW);
+  let [r] = s.links.unknown();
+  assert.equal(r.evidence.suggestion, null);
+  assert.equal(r.evidence.noGps, false);
+  // Once they are in, the same passes give the answer.
+  for (const t of s.ts) s.h.run('INSERT OR REPLACE INTO gps_segment_days (day, synced_at) VALUES (?, ?)', T.dayOf(t), NOW);
+  [r] = s.links.unknown();
+  assert.equal(r.evidence.suggestion?.vehicleId, 1);
+});
+
 test('street: too few passes to tell', () => {
   const s = streetSetup(3);
   for (const t of s.ts) s.seg(1, t - 60e3, t + 60e3, PLANT_STREET);
@@ -153,7 +172,7 @@ test('street: too few passes to tell', () => {
 
 test('real: 10834HDA passes and no GPS truck crosses with it: probably no tracker', () => {
   const s = setup();
-  s.regular('10834HDA', 3);
+  for (const t of s.regular('10834HDA', 3)) s.h.run('INSERT OR REPLACE INTO gps_segment_days (day, synced_at) VALUES (?, ?)', T.dayOf(t), NOW);
   s.h.run('INSERT INTO yard_visits (vehicle_id, enter_t, exit_t) VALUES (2, ?, ?)', NOW - 10 * DAY, NOW - 9 * DAY);
   const [r] = s.links.unknown();
   assert.equal(r.evidence.suggestion, null);

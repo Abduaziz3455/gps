@@ -68,14 +68,19 @@ class PlateLinks {
     const strong = best && best[1] >= SUGGEST_HITS && best[1] / checked >= SUGGEST_SHARE && (!second || best[1] >= 2 * second[1]);
     if (strong) return { suggestion: named(best[0], best[1], checked, 'crossings'), noGps: false };
 
-    const counted = [...street].map(([id, stops]) => [id, events.filter((e) => atStreet(stops, e)).length]).sort((a, b) => b[1] - a[1]);
-    const n = events.length;
+    // Only days GoGPS has answered for: a truck can't be missing from a day nobody has asked about yet.
+    const known = new Set(this.h.all('SELECT day FROM gps_segment_days').map((r) => r.day));
+    const covered = events.filter((e) => known.has(T.dayOf(e.t)));
+    const counted = [...street].map(([id, stops]) => [id, covered.filter((e) => atStreet(stops, e)).length]).sort((a, b) => b[1] - a[1]);
+    const n = covered.length;
     if (n >= STREET_MIN_PASSES && counted.length) {
       const [[id, top], [, next] = [null, 0]] = counted;
       if (top / n >= STREET_SHARE && (top - next) / n >= STREET_LEAD) return { suggestion: named(id, top, n, 'street'), noGps: false };
       if (top / n < STREET_SHARE) return { suggestion: null, noGps: true };
       return { suggestion: null, noGps: false };
     }
+    // Too little to go on. Crossings alone can't say "no tracker" while most passes are on days still to be fetched.
+    if (covered.length < events.length / 2) return { suggestion: null, noGps: false };
     return { suggestion: null, noGps: checked >= SUGGEST_HITS && (!best || best[1] / checked < 1 / 3) };
   }
 
