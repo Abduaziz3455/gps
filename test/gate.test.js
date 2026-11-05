@@ -65,6 +65,19 @@ test('exit confirmed when GPS left the yard within the window', async () => {
   assert.equal(gate.get(ev.id).status, 'confirmed');
 });
 
+test('exit confirmed when GPS saw it leave minutes after the camera, once it has gone', async () => {
+  // Real: 10870HDA at 07:06:40 crossed at 07:08:56, still in the circle at the first check, gone by a later one.
+  const { gate, poller, visit, capture } = setup();
+  poller.live.set(1, { id: 1, status: 'stopped', inYard: true, recordTime: T0 + 90e3 });
+  const ev = await capture(3, T0, '85450KBA');
+  gate.resolvePending(T0 + 100e3);
+  assert.equal(gate.get(ev.id).status, 'pending', 'still in the circle');
+  visit(1, T0 - 3600e3, T0 + 136e3);
+  poller.live.set(1, { id: 1, status: 'moving', inYard: false, recordTime: T0 + 140e3 });
+  gate.resolvePending(T0 + 160e3);
+  assert.equal(gate.get(ev.id).status, 'confirmed');
+});
+
 test('exit vetoed when the truck is still parked in the yard 5 minutes later', async () => {
   const { gate, poller, capture } = setup();
   poller.live.set(1, { id: 1, status: 'stopped', inYard: true, recordTime: T0 + 4 * 60e3 });

@@ -270,12 +270,12 @@ class Gate {
 
     if (row.direction === 'out') {
       if (row.vehicle_id) {
-        if (this.crossings('exit', t - before, t + after).includes(row.vehicle_id)) return set('confirmed', "GPS: hovlidan chiqdi");
+        // Trucks often pass the exit camera and leave the circle minutes later, so the whole window counts.
+        if (this.crossings('exit', t - before, t + exitConfirm).includes(row.vehicle_id)) return set('confirmed', "GPS: hovlidan chiqdi");
         if (live && live.status !== 'offline' && live.inYard) {
           if (now - t < exitConfirm) return later(30e3);
           // Trucks often pass the exit camera and stand in the yard circle for minutes (paperwork, tarpaulin), and a
           // standing tracker reports rarely. So being in the circle isn't a veto: only not having moved is.
-          if (this.crossings('exit', t - before, t + exitConfirm).includes(row.vehicle_id)) return set('confirmed', "GPS: hovlidan chiqdi");
           if (this.movedAround(row.vehicle_id, t, exitConfirm) >= VETO_MOVED_M) return set('unconfirmed', "GPS: chiqqan, lekin hovli yonida turibdi");
           return set('vetoed', `GPS: ${Math.round(exitConfirm / 60e3)} daqiqadan keyin ham hovlida turibdi`);
         }
