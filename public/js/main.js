@@ -11,6 +11,7 @@ const PAGES = [
   { path: 'ogohlantirish', title: 'Ogohlantirishlar', load: () => import('./pages/alerts.js') },
   { path: 'transport', title: 'Transport', label: 'Transport', icon: 'truck', nav: true, load: () => import('./pages/vehicle.js') },
   { path: 'joylar', title: 'Hisobotlar', section: 'hisobot', load: () => import('./pages/places.js') },
+  { path: 'reyslar', title: 'Hisobotlar', section: 'hisobot', load: () => import('./pages/trips.js') },
   { path: 'tahlil', title: 'Hisobotlar', section: 'hisobot', load: () => import('./pages/analytics.js'), owner: true },
   { path: 'hisobot', title: 'Hisobotlar', label: 'Hisobot', icon: 'report', nav: true, load: () => import('./pages/reports.js') },
   { path: 'sozlamalar', title: 'Sozlamalar', load: () => import('./pages/settings.js') },

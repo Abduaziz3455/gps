@@ -4,7 +4,7 @@ import { $, $$, html, setHtml, icon, hms, when, dur, today, dayLabel, GATE_STATU
 
 const HOW = {
   plate: "Raqam bo'yicha", alias: 'Biriktirilgan haqiqiy raqam', similar: "O'xshash raqam (GPS'dagi nomi farq qiladi)",
-  learned: "O'rganilgan: GPS chiqish vaqtlari mos keldi", gps: "GPS bo'yicha (raqam o'qilmagan)", manual: "Qo'lda biriktirilgan",
+  learned: "O'rganilgan: GPS chiqish vaqtlari mos keldi", gps: "GPS bo'yicha (raqam o'qilmagan)", manual: "Qo'lda biriktirilgan", link: "Raqam rahbar tomonidan biriktirilgan",
 };
 const LONG_INSIDE_S = 2 * 3600;
 
@@ -97,7 +97,7 @@ export default {
           const s = x.since ? (now - x.since) / 1000 : null;
           return html`<div class="inside-row ${s > LONG_INSIDE_S ? 'long' : ''}">
             <div><b>${x.vehicleId ? html`<a href="#/transport/${x.vehicleId}">${x.label}</a>` : x.label}</b>
-              <div class="small muted">${x.fleet ? 'Avtopark' : 'Begona'}${x.since ? ` · ${when(x.since)} dan` : ''}${x.gpsInYard ? ' · GPS ✓' : x.fleet && x.gpsInYard === null ? " · GPS signal yo'q" : ''}</div></div>
+              <div class="small muted">${x.fleet ? 'Avtopark' : 'Begona'}${x.since ? ` · ${when(x.since)} dan` : ''}${x.gpsInYard ? ' · GPS ✓' : x.cameraOnly ? ' · faqat kamera' : x.fleet && x.gpsInYard === null ? " · GPS signal yo'q" : ''}</div></div>
             <div class="dur" data-since="${x.since || ''}">${s != null ? dur(s) : '—'}</div></div>`;
         };
         $('#insideCount', main).textContent = `${y.inside.length} ta`;

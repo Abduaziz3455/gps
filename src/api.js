@@ -12,12 +12,16 @@ const { serveTile } = require('./tiles');
 const { vehicleLabel, vehicleType, prettyPlate, plateKey } = require('./gps/normalize');
 const { view: gateView } = require('./gate');
 const { Places } = require('./places');
+const { Trips } = require('./trips');
+const { PlateLinks } = require('./platelinks');
 
 const VEHICLE_TYPES = ['auto', 'mixer', 'dump', 'excavator', 'car', 'other'];
 
 function buildApi(ctx) {
   const { h, config, auth, poller, gate, analytics, rules, push, gps, health: monitor } = ctx;
   const places = ctx.places || new Places({ h, config, log: ctx.log });
+  const trips = ctx.trips || new Trips({ h, gps, places, config, log: ctx.log });
+  const plateLinks = ctx.plateLinks || new PlateLinks({ h, analytics, trips, log: ctx.log });
   const r = new Router();
 
   // --- guards ----------------------------------------------------------------------------------
@@ -39,7 +43,7 @@ function buildApi(ctx) {
   const vehicleRows = () => h.all('SELECT * FROM vehicles WHERE active = 1 OR in_gps = 1');
   const liveView = (v, p) => ({
     id: v.id, label: vehicleLabel(v), gpsName: v.name, plate: v.plate ? prettyPlate(v.plate) : null, model: v.model,
-    type: vehicleType(v), active: !!v.active, inGps: !!v.in_gps,
+    type: vehicleType(v), active: !!v.active, inGps: !!v.in_gps, cameraOnly: !!v.camera_only,
     lat: p?.lat ?? null, lng: p?.lng ?? null, speed: p?.speed ?? 0, course: p?.course ?? 0,
     status: p?.status ?? 'offline', recordTime: p?.recordTime ?? null, address: p?.address ?? '', inYard: !!p?.inYard,
   });
@@ -74,6 +78,7 @@ function buildApi(ctx) {
     if ('plate' in b) {
       plate = plateKey(text('plate')) || null;
       if (plate && h.get('SELECT 1 FROM vehicles WHERE plate = ? AND id != ?', plate, id)) throw httpError(409, 'Bu raqam boshqa transportga biriktirilgan');
+      if (plate && h.get('SELECT 1 FROM plate_links WHERE plate = ? AND vehicle_id IS NOT ?', plate, id)) throw httpError(409, 'Bu raqam boshqa transportga biriktirilgan');
     }
     if ('display' in b) display = text('display') ? b.display.slice(0, 40) : null;
     if ('fuelNorm' in b && b.fuelNorm !== null && b.fuelNorm !== '') {
@@ -96,7 +101,8 @@ function buildApi(ctx) {
     owner(req);
     return h.all('SELECT * FROM vehicles ORDER BY active DESC, name').map((v) => ({
       id: v.id, gpsName: v.name, label: vehicleLabel(v), plate: v.plate ? prettyPlate(v.plate) : '', display: v.display || '', type: v.type,
-      model: v.model, fuelNorm: v.fuel_norm, active: !!v.active, inGps: !!v.in_gps,
+      model: v.model, fuelNorm: v.fuel_norm, active: !!v.active, inGps: !!v.in_gps, cameraOnly: !!v.camera_only,
+      linked: h.all('SELECT plate FROM plate_links WHERE vehicle_id = ? AND created = 0', v.id).map((l) => prettyPlate(l.plate)),
       learned: h.all('SELECT plate, hits FROM alias_hits WHERE vehicle_id = ? ORDER BY hits DESC LIMIT 3', v.id).map((a) => ({ plate: prettyPlate(a.plate), hits: a.hits })),
       // Camera reads matched to this vehicle by "same digits and letters": the likely real plate.
       suggestedPlate: v.plate ? null : (() => { const g = h.get("SELECT plate, COUNT(*) n FROM gate_events WHERE vehicle_id = ? AND identified_by = 'similar' GROUP BY plate ORDER BY n DESC LIMIT 1", v.id); return g ? prettyPlate(g.plate) : null; })(),
@@ -167,6 +173,7 @@ function buildApi(ctx) {
     const id = intParam(p.id, 'id');
     if (!gps) throw httpError(503, 'GPS ulanmagan');
     const day = T.isDay(req.query.day) ? req.query.day : T.today();
+    if (h.get('SELECT camera_only c FROM vehicles WHERE id = ?', id)?.c) return { moves: [], stops: [] }; // no tracker to ask about
     const key = `${id}:${day}`;
     const hit = stopCache.get(key);
     if (hit && Date.now() - hit.at < (day === T.today() ? 5 * 60e3 : 3600e3)) return hit.data;
@@ -194,6 +201,35 @@ function buildApi(ctx) {
   r.post('/api/places', (req) => { owner(req); return places.create(req.body, req.user); });
   r.patch('/api/places/:id', (req, res, p) => { owner(req); return places.update(intParam(p.id, 'id'), req.body); });
   r.delete('/api/places/:id', (req, res, p) => { owner(req); places.remove(intParam(p.id, 'id')); return { ok: true }; });
+
+  // --- trips ------------------------------------------------------------------------------------
+  r.get('/api/trips', (req) => {
+    user(req);
+    const { from, to } = range(req.query, 1);
+    const q = req.query;
+    return trips.list({
+      from, to,
+      vehicle: q.vehicle ? intParam(q.vehicle, 'vehicle') : null,
+      place: q.place ? intParam(q.place, 'place') : null,
+      near: q.near === '1',
+    });
+  });
+
+  // --- plates the cameras read that no vehicle has: only the owner decides --------------------------
+  r.get('/api/plates/unknown', (req) => { owner(req); return plateLinks.unknown(); });
+  r.get('/api/plates/decided', (req) => { owner(req); return plateLinks.decided(); });
+  r.post('/api/plates/:plate/link', async (req, res, p) => {
+    owner(req);
+    const b = req.body;
+    if (b.outside === true) return plateLinks.markOutside(p.plate, req.user);
+    if (b.newTruck) {
+      const type = b.newTruck.type ?? 'auto';
+      if (!VEHICLE_TYPES.includes(type)) throw httpError(400, "Noto'g'ri tur");
+      return plateLinks.addTruck(p.plate, { name: b.newTruck.name, type }, req.user);
+    }
+    return plateLinks.link(p.plate, intParam(b.vehicleId, 'vehicleId'), req.user);
+  });
+  r.delete('/api/plates/:plate/link', (req, res, p) => { owner(req); return plateLinks.undo(p.plate); });
 
   // --- gate ------------------------------------------------------------------------------------
   r.get('/api/gate-events', (req) => {
@@ -300,11 +336,11 @@ function buildApi(ctx) {
         if (!p.inYard) continue;
         const visit = poller.openVisit.get(v.id);
         const camOk = camIn && (!visit || camIn.t >= visit.enter_t - 10 * 60e3);
-        const item = { key: `v${v.id}`, vehicleId: v.id, label: vehicleLabel(v), fleet: true, gpsInYard: true,
+        const item = { key: `v${v.id}`, vehicleId: v.id, label: vehicleLabel(v), fleet: true, cameraOnly: false, gpsInYard: true,
           since: camOk ? camIn.t : visit && !visit.approx ? visit.enter_t : visit?.enter_t ?? null, event: camOk ? gateView(camIn, h) : null };
         (camOk ? inside : gpsOnly).push(item);
       } else if (camIn && now - camIn.t < 12 * 3600e3) {
-        inside.push({ key: `v${v.id}`, vehicleId: v.id, label: vehicleLabel(v), fleet: true, gpsInYard: null, since: camIn.t, event: gateView(camIn, h) });
+        inside.push({ key: `v${v.id}`, vehicleId: v.id, label: vehicleLabel(v), fleet: true, cameraOnly: !!v.camera_only, gpsInYard: null, since: camIn.t, event: gateView(camIn, h) });
       }
     }
     for (const [key, g] of last) {
@@ -323,7 +359,7 @@ function buildApi(ctx) {
     const live = [...(poller?.live.values() || [])];
     const active = new Set(h.all('SELECT id FROM vehicles WHERE active = 1').map((v) => v.id));
     const counts = { moving: 0, idle: 0, stopped: 0, offline: 0 };
-    for (const v of vehiclesLive()) counts[v.status]++;
+    for (const v of vehiclesLive()) if (!v.cameraOnly) counts[v.status]++;
     void live; void active;
     return { ...analytics.today(), insideFleet: y.inside.filter((x) => x.fleet).length + y.gpsOnly.length, insideOutside: y.inside.filter((x) => !x.fleet).length, status: counts };
   });
@@ -455,6 +491,7 @@ function buildApi(ctx) {
       positions: (list) => send('positions', list.map((p) => { const v = vmap.get(p.id); return v && v.active ? liveView(v, p) : null; }).filter(Boolean)),
       vehicles: () => { vmap = vehiclesById(); send('vehicles', {}); },
       places: () => send('places', {}),
+      trips: () => send('trips', {}),
       gate: (ev) => send('gate', ev),
       'gate:update': (ev) => send('gate:update', ev),
       alert: (a) => send('alert', a),

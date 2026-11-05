@@ -10,6 +10,7 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const REPORT_TABS = [
   { path: 'tahlil', label: 'Umumiy', owner: true },
   { path: 'hisobot', label: 'Transportlar' },
+  { path: 'reyslar', label: 'Reyslar' },
   { path: 'joylar', label: 'Joylar' },
 ];
 

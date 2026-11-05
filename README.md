@@ -16,6 +16,7 @@ The menu has four items: Xarita, Darvoza, Transport and Hisobot. Tahlil, Hisobot
 | **Darvoza** | everyone | Live entries and exits with the plate photo and overview snapshot, GPS check of each pass, who is in the yard now and for how long, outside vehicles, manual corrections |
 | **Ogohlantirishlar** | everyone | Fuel drains, speeding, no GPS signal, long stops outside the yard, NVR/GPS outages; acknowledge |
 | **Transport** | everyone | One vehicle's day: track, stops, gate passes, fuel events; last 14 days, with average L/100 km and utilization |
+| **Reyslar** | everyone | One row per trip: left, came back, km, fuel, where it went, photos of both passes, CSV. Works from cameras and GPS together (docs/ARCHITECTURE.md, 6b). |
 | **Joylar** | everyone / owner | Places named on the map, from a stop on a truck's track or a spot suggested because trucks often stop there (the owner names or ignores it): trips to each, which trucks, how long. Their names replace addresses on the map and in lists |
 | **Tahlil** | owner | KPIs vs the previous period, trips/km/active vehicles per day, gate traffic heatmap, turnaround, per-vehicle ranking, outside vehicles |
 | **Hisobot** | everyone | Per-vehicle table for any range, CSV, print |

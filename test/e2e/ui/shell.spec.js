@@ -143,7 +143,7 @@ test.describe('navigation', () => {
     await expect(navLabels(page)).toHaveText(MENU);
     await page.click('#nav a[data-path=hisobot]');
     await expect(page).toHaveURL(/#\/hisobot/);
-    await expect(reportTabs(page)).toHaveText(['Transportlar', 'Joylar']);
+    await expect(reportTabs(page)).toHaveText(['Transportlar', 'Reyslar', 'Joylar']);
   });
 
   test('owner: Hisobot opens on the overview; the tabs walk through the section', async ({ page, signIn }) => {
@@ -151,8 +151,8 @@ test.describe('navigation', () => {
     await page.click('#nav a[data-path=hisobot]');
     await expect(page).toHaveURL(/#\/tahlil/);
     await expect(page.locator('#anKpis .tile').first()).toBeVisible();
-    await expect(reportTabs(page)).toHaveText(['Umumiy', 'Transportlar', 'Joylar']);
-    for (const [label, path, ready] of [['Transportlar', 'hisobot', '#repTable table'], ['Joylar', 'joylar', '#plTable'], ['Umumiy', 'tahlil', '#anKpis .tile']]) {
+    await expect(reportTabs(page)).toHaveText(['Umumiy', 'Transportlar', 'Reyslar', 'Joylar']);
+    for (const [label, path, ready] of [['Transportlar', 'hisobot', '#repTable table'], ['Reyslar', 'reyslar', '#trTable'], ['Joylar', 'joylar', '#plTable'], ['Umumiy', 'tahlil', '#anKpis .tile']]) {
       await reportTabs(page).filter({ hasText: label }).click();
       await expect(page).toHaveURL(new RegExp(`#/${path}`));
       await expect(page.locator(ready).first()).toBeVisible();

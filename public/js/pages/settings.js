@@ -422,7 +422,8 @@ async function renderVehicles(panel) {
 
   const rowHtml = (v) => html`<tr data-id="${v.id}"${v.active ? '' : ' class="inactive"'}>
     <td style="min-width:150px"><div style="font-weight:650">${v.gpsName}</div>
-      <div class="small muted">${v.model || '—'}${v.inGps ? '' : html` · <span class="pill warn">GPS'da yo'q</span>`}</div></td>
+      <div class="small muted">${v.model || '—'}${v.cameraOnly ? html` · <span class="pill">Faqat kamera</span>` : v.inGps ? '' : html` · <span class="pill warn">GPS'da yo'q</span>`}</div>
+      ${v.linked?.length ? html`<div class="small muted" title="Rahbar shu transportga biriktirgan raqamlar">Raqam: ${v.linked.join(', ')}</div>` : ''}</td>
     <td><input name="display" value="${v.display}" placeholder="GPS nomi" maxlength="40" style="width:150px" aria-label="Ko'rinadigan nom: ${v.gpsName}" /></td>
     <td style="min-width:170px"><input name="plate" value="${v.plate}" placeholder="kiritilmagan" style="width:130px;font-family:var(--mono)" autocapitalize="characters" spellcheck="false" aria-label="Davlat raqami: ${v.gpsName}" />
       ${v.suggestedPlate ? html`<div><button class="btn btn-ghost btn-sm" type="button" data-suggest="${v.suggestedPlate}" title="Kamera shu transport uchun o'qigan raqam" style="padding:0 4px;height:24px;color:var(--accent)">Taklif: ${v.suggestedPlate}</button></div>` : ''}
@@ -438,6 +439,7 @@ async function renderVehicles(panel) {
       mashina boshqacha nomlangan bo'lishi mumkin (masalan, "15" yoki "10 870 HAD"). Raqam to'g'ri kiritilsa, kamera hodisalari shu transportga
       bog'lanadi va reyslar to'g'ri hisoblanadi. "Taklif" — kamera shu transport uchun o'qigan raqam. Yoqilg'i normasi kiritilsa, sarf normadan 15% oshganda hisobotda belgilanadi.
       Faol bo'lmagan transportlar xarita, hisobot va tahlilda ko'rsatilmaydi.</div>
+    <section class="card" id="plateBox" hidden></section>
     <section class="card">
       <div class="card-head"><h3>Transportlar</h3><span class="small muted">${list.length} ta · ${list.filter((v) => v.active).length} ta faol</span></div>
       <div class="table-wrap"><table class="table veh-edit">
@@ -446,6 +448,15 @@ async function renderVehicles(panel) {
       </table></div>
     </section>
   </div>`);
+
+  const plateBox = plateDecisions($('#plateBox', panel), async () => {
+    // A truck made for a plate, or one that went away: the list below follows.
+    list = await get('/api/vehicles/all');
+    orig.clear();
+    for (const v of list) orig.set(v.id, snapshot(v));
+    setHtml($('.veh-edit tbody', panel), html`${list.map(rowHtml)}`);
+  });
+  await plateBox.load();
 
   const read = (tr) => ({
     display: tr.querySelector('[name=display]').value.trim(),
@@ -492,6 +503,97 @@ async function renderVehicles(panel) {
     return undefined;
   });
   return null;
+}
+
+// --- Noma'lum raqamlar: plates the cameras keep reading that no vehicle has -----------------------------
+
+function plateDecisions(box, onVehiclesChanged) {
+  let rows = [], decided = [];
+  const vehicles = () => [...state.vehicles.values()].filter((v) => !v.cameraOnly).sort((a, b) => a.label.localeCompare(b.label));
+
+  const hint = (r) => {
+    const e = r.evidence;
+    const x = e.suggestion;
+    if (x) {
+      return html`<div class="small plate-hint good" data-hint="gps">${x.basis === 'street'
+        ? html`Taklif: <b>${x.label}</b>. Shu raqamning ${x.checked} ta o'tishidan ${x.hits} tasida bu transport hovli ko'chasida turgan`
+        : html`Taklif: <b>${x.label}</b>. Shu raqam ${x.checked} marta chiqqanda ${x.hits} marta bu transport ham hovlidan chiqqan`}</div>`;
+    }
+    if (e.noGps) return html`<div class="small plate-hint" data-hint="nogps">Hech bir GPS transporti aniq mos kelmadi. GPS'siz bo'lishi mumkin</div>`;
+    return html`<div class="small muted plate-hint" data-hint="none">GPS bilan solishtirish uchun ma'lumot hali yetarli emas</div>`;
+  };
+  const rowHtml = (r) => html`<tr data-plate="${r.plate}">
+    <td class="plate-photo">${r.photoUrl ? html`<a href="#/darvoza?event=${r.eventId}" title="Oxirgi o'tishni ochish"><img loading="lazy" alt="" src="${r.photoUrl}"></a>` : ''}</td>
+    <td><span class="plate-chip">${r.text}</span>
+      <div class="small muted">${r.passes} marta · ${r.days} kunda · oxirgi: ${when(r.lastAt)}</div>
+      ${hint(r)}
+      ${r.similar.length ? html`<div class="small muted">Bir belgi farq qiladi: ${r.similar.map((x, i) => html`${i ? ', ' : ''}${x.label}`)}</div>` : ''}</td>
+    <td class="plate-actions">
+      <div class="plate-link"><select name="vehicle" aria-label="Qaysi transport: ${r.text}"><option value="">GPS transportini tanlang</option>${vehicles().map((v) => html`<option value="${v.id}" ${r.evidence.suggestion?.vehicleId === v.id ? 'selected' : ''}>${v.label}${v.gpsName !== v.label ? ` (GPS: ${v.gpsName})` : ''}</option>`)}</select>
+        <button class="btn btn-sm btn-primary" type="button" data-act="link">Biriktirish</button></div>
+      <div class="plate-other"><button class="btn btn-sm" type="button" data-act="truck">Bizniki, GPS'siz</button> <button class="btn btn-sm btn-ghost" type="button" data-act="outside">Begona</button></div></td>
+  </tr>`;
+  const kindText = (d) => (d.kind === 'outside' ? 'Begona' : d.created ? "Bizniki, GPS'siz" : d.label);
+
+  const draw = () => {
+    box.hidden = !rows.length && !decided.length;
+    setHtml(box, html`<div class="card-head"><h3>Noma'lum raqamlar</h3><span class="small muted">kamera tez-tez o'qiydi, lekin hech bir transportga tegishli emas</span><span class="spacer"></span><span class="small muted" id="plateCount">${rows.length} ta</span></div>
+      ${rows.length ? html`<div class="table-wrap"><table class="table plate-table"><tbody>${rows.map(rowHtml)}</tbody></table></div>` : html`<div class="empty small">Hal qilinmagan raqam yo'q</div>`}
+      ${decided.length ? html`<details class="pl-ignored" id="plateDecided"><summary>Qaror qabul qilinganlar (${decided.length})</summary><div class="table-wrap"><table class="table"><tbody>${decided.map((d) => html`<tr data-plate="${d.plate}"><td><span class="plate-chip">${d.text}</span></td><td>${kindText(d)}</td><td class="num small muted">${d.passes} marta</td><td class="right"><button class="btn btn-sm" type="button" data-act="undo">Qaytarish</button></td></tr>`)}</tbody></table></div></details>` : ''}`);
+  };
+
+  const load = async () => {
+    [rows, decided] = await Promise.all([get('/api/plates/unknown'), get('/api/plates/decided')]);
+    draw();
+  };
+
+  const act = {
+    link: async (r, tr) => {
+      const id = Number(tr.querySelector('[name=vehicle]').value);
+      if (!id) { toastError(new Error('Avval GPS transportini tanlang')); return undefined; }
+      const v = state.vehicles.get(id);
+      if (!await confirmDialog('Raqamni biriktirish', `${r.text} — ${v?.label}. O'tgan ${r.passes} ta o'tish shu transportga o'tadi va reyslar qayta hisoblanadi. Keyin qaytarish mumkin.`, 'Biriktirish')) return undefined;
+      const x = await post(`/api/plates/${r.plate}/link`, { vehicleId: id });
+      toast({ title: `Biriktirildi: ${r.text} — ${x.label}`, body: `${x.moved} ta o'tish ko'chirildi`, kind: 'good', timeout: 4000 });
+      return true;
+    },
+    truck: async (r) => {
+      if (!await confirmDialog("GPS'siz transport qo'shish", `${r.text} avtoparkka qo'shiladi. Reyslari faqat darvoza kameralari bo'yicha hisoblanadi: masofa va manzil bo'lmaydi. O'tgan ${r.passes} ta o'tish shu transportga o'tadi.`, "Qo'shish")) return undefined;
+      const x = await post(`/api/plates/${r.plate}/link`, { newTruck: {} });
+      toast({ title: `Qo'shildi: ${x.label}`, body: `${x.moved} ta o'tish ko'chirildi`, kind: 'good', timeout: 4000 });
+      return true;
+    },
+    outside: async (r) => {
+      await post(`/api/plates/${r.plate}/link`, { outside: true });
+      toast({ title: `Begona: ${r.text}`, timeout: 2500 });
+      return true;
+    },
+    undo: async (d) => {
+      if (d.kind !== 'outside' && !await confirmDialog('Qarorni qaytarish', `${d.text}: ${d.passes} ta o'tish yana begona deb hisoblanadi.${d.created ? " Shu raqam uchun qo'shilgan transport o'chiriladi." : ''}`, 'Qaytarish', true)) return undefined;
+      await del(`/api/plates/${d.plate}/link`);
+      toast({ title: `Qaytarildi: ${d.text}`, timeout: 2500 });
+      return true;
+    },
+  };
+
+  // A photo the NVR can't give right now: no broken picture.
+  box.addEventListener('error', (e) => { if (e.target.tagName === 'IMG') e.target.hidden = true; }, true);
+  box.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    const tr = b.closest('tr[data-plate]');
+    const r = [...rows, ...decided].find((x) => x.plate === tr.dataset.plate);
+    b.disabled = true;
+    try {
+      if (await act[b.dataset.act](r, tr)) {
+        await load();
+        await onVehiclesChanged();
+        return;
+      }
+    } catch (ex) { toastError(ex); }
+    b.disabled = false;
+  });
+  return { load };
 }
 
 // --- Tizim -------------------------------------------------------------------------------------------

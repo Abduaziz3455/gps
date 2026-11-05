@@ -71,17 +71,19 @@ class Analytics {
 
   /** Recompute one day. `withGps` false: only the gate/positions columns (no GoGPS requests). */
   async rollup(day, { withGps = true } = {}) {
-    const ids = this.h.all('SELECT id FROM vehicles WHERE in_gps = 1').map((r) => r.id);
+    // Trucks with no tracker are counted by the cameras, and GoGPS isn't asked about them.
+    const ids = this.h.all('SELECT id FROM vehicles WHERE in_gps = 1 OR camera_only = 1').map((r) => r.id);
+    const gpsIds = this.h.all('SELECT id FROM vehicles WHERE in_gps = 1').map((r) => r.id);
     if (!ids.length) return;
     const from = T.dayStart(day), to = Math.min(from + T.DAY, Date.now());
     const gps = new Map();
     const g = (id) => { if (!gps.has(id)) gps.set(id, { refuel_l: 0, drain_l: 0 }); return gps.get(id); };
     const fuelEvents = [];
-    if (withGps && this.gps && to > from) {
+    if (withGps && this.gps && to > from && gpsIds.length) {
       const [mil, fuel, inout] = await Promise.all([
-        this.gps.mileage(ids, from, to, 86400),
-        this.gps.fuel(ids, from, to, 86400),
-        this.gps.fuelInOut(ids, from, to),
+        this.gps.mileage(gpsIds, from, to, 86400),
+        this.gps.fuel(gpsIds, from, to, 86400),
+        this.gps.fuelInOut(gpsIds, from, to),
       ]);
       for (const v of mil) {
         const ps = v.periods || [];

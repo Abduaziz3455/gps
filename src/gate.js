@@ -36,6 +36,7 @@ const HISTORY_DONE = 'camera_history_done'; // kv: when the first-run camera imp
 const PLAYABLE_WAIT_MS = 4 * 60e3; // the NVR makes a recording playable within 2 min; past this give up waiting
 const PLAYABLE_POLL_MS = 15e3;
 const TOP_VIEW_TRIES = 3;
+const CAMERA_ONLY_NOTE = "GPS yo'q: faqat kamera";
 const VETO_MOVED_M = 50; // moved less than this around an exit capture: a maneuver. Real ones moved 0-30 m, real exits 69 m or more (5 Nov 2026)
 
 class Gate {
@@ -88,6 +89,11 @@ class Gate {
   /** Fleet vehicle for a plate read: {vehicle, how} or null. */
   matchPlate(plate, vs = this.vehicles()) {
     if (!plate) return null;
+    // The owner's decision comes first (src/platelinks.js).
+    const link = this.h.get('SELECT kind, vehicle_id FROM plate_links WHERE plate = ?', plate);
+    if (link?.kind === 'outside') return null;
+    const linked = link && vs.find((x) => x.id === link.vehicle_id);
+    if (linked) return { vehicle: linked, how: 'link' };
     let v = vs.find((x) => x.plate && plateKey(x.plate) === plate);
     if (v) return { vehicle: v, how: 'alias' };
     v = vs.find((x) => plateKey(x.name) === plate);
@@ -109,6 +115,7 @@ class Gate {
       if (this.plates.isValid(k)) out.push(k);
     }
     for (const p of this.learnedAliases(vs).keys()) out.push(p);
+    for (const l of this.h.all("SELECT plate FROM plate_links WHERE kind = 'vehicle'")) out.push(l.plate);
     return [...new Set(out)];
   }
 
@@ -163,7 +170,9 @@ class Gate {
     const now = Date.now();
     const m = d.valid ? this.matchPlate(d.plate) : null;
     let status, resolveAt = null;
+    const cameraOnly = !!m?.vehicle.camera_only; // no tracker: there is no GPS to wait for, and the camera's word stands
     if (mode === 'history') status = m || !d.valid ? 'history' : 'outside';
+    else if (cameraOnly) status = 'history';
     else if (m && d.direction === 'in') status = 'pending';
     else if (!m && d.valid && d.direction === 'in') status = 'outside';
     else status = 'pending';
@@ -171,10 +180,10 @@ class Gate {
     const live = mode !== 'history';
     const topView = live && this.topView && d.camera.topView && d.camera.contextChannel ? 'pending' : null;
     const r = this.h.run(`INSERT OR IGNORE INTO gate_events (capture_name, t, direction, camera, channel, plate, plate_raw,
-      plate_valid, vehicle_id, identified_by, status, stay_s, gap, capture_uri, resolve_at, created_at, top_view, alert_state)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      plate_valid, vehicle_id, identified_by, status, status_note, stay_s, gap, capture_uri, resolve_at, created_at, top_view, alert_state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     cap.name, cap.time, d.direction, d.camera.name, cap.channel, d.plate, d.raw, d.valid ? 1 : 0,
-    m?.vehicle.id ?? null, m?.how ?? null, status, d.staySeconds ?? null, d.gap ? 1 : 0, cap.uriPath || null, resolveAt, now,
+    m?.vehicle.id ?? null, m?.how ?? null, status, cameraOnly && live ? CAMERA_ONLY_NOTE : null, d.staySeconds ?? null, d.gap ? 1 : 0, cap.uriPath || null, resolveAt, now,
     topView, live ? 'pending' : null);
     if (!r.changes) return;
     const id = Number(r.lastInsertRowid);
@@ -184,7 +193,7 @@ class Gate {
     const ev = this.get(id);
     bus.emit('gate', ev);
     // Entries of known vehicles and outside vehicles go out at once; the rest after GPS resolution.
-    if (ev.status === 'outside' || (ev.direction === 'in' && ev.vehicleId)) this.notify(id);
+    if (ev.status === 'outside' || cameraOnly || (ev.direction === 'in' && ev.vehicleId)) this.notify(id);
   }
 
   async fetchPhotos(id, d) {

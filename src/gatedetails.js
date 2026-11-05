@@ -56,6 +56,7 @@ class GateDetails {
   /** @returns {Promise<object|null>} null: not a fleet vehicle, or no GPS */
   async forEvent(ev) {
     if (!ev.vehicleId || !this.gps) return null;
+    if (this.h.get('SELECT camera_only c FROM vehicles WHERE id = ?', ev.vehicleId)?.c) return null; // no tracker to ask
     const t = ev.t, id = ev.vehicleId;
     const out = {};
     try {

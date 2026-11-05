@@ -709,3 +709,22 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .table-wrap { overflow: visible; }
   .table th { position: static; }
 }
+
+/* Reyslar */
+.tr-filters { align-items: end; flex-wrap: wrap; }
+.tr-side { margin: 12px 0 6px; font-size: 13px; font-weight: 650; }
+.tr-photos { margin-top: 8px; }
+/* Noma'lum raqamlar */
+.plate-photo { width: 92px; }
+.plate-photo img { width: 80px; height: 54px; object-fit: cover; border-radius: 6px; display: block; }
+.plate-hint.good { color: var(--good, inherit); }
+.plate-actions { min-width: 280px; }
+.plate-link { display: flex; gap: 6px; margin-bottom: 6px; }
+.plate-link select { flex: 1; min-width: 0; }
+@media (max-width: 720px) {
+  .plate-table, .plate-table tbody, .plate-table tr, .plate-table td { display: block; width: auto; }
+  .plate-table tr { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .plate-table td { border: 0; padding: 4px 0; }
+  .plate-actions { min-width: 0; }
+}
+@media (max-width: 720px) { .tr-m-hide { display: none; } }

@@ -3,7 +3,8 @@
  * GoGPS (baku.gps.az, API v3) client. Runs on the server only: the account's password never reaches a browser.
  *
  * The API rejects requests closer than ~1 s apart. Live polling and reports go through two lanes, each spaced
- * by `minGapMs` (what v1 did in production), so a 60 s report never delays the 10 s live update.
+ * by `minGapMs` (what v1 did in production), so a 60 s report never delays the 10 s live update. A third lane is for
+ * slow background reading (a day of moves and stops takes about 48 s), so that never delays an alert's report.
  * Period reports take naive local times plus the UTC offset in hours; their responses come back in local time.
  */
 const { localIso } = require('../time');
@@ -20,7 +21,7 @@ class GpsClient {
     this.fetch = fetchImpl;
     this.log = log;
     this.token = null;
-    this.lanes = { live: { chain: Promise.resolve(), last: 0 }, report: { chain: Promise.resolve(), last: 0 } };
+    this.lanes = { live: { chain: Promise.resolve(), last: 0 }, report: { chain: Promise.resolve(), last: 0 }, bulk: { chain: Promise.resolve(), last: 0 } };
     this.lastOk = 0;
     this.lastError = null;
   }
@@ -101,7 +102,7 @@ class GpsClient {
     return asArray(await this.request('/api/v3/vehicles/getlastdata', { VehiclesIds: ids }, { timeoutMs: 25000, retries: 2 }));
   }
 
-  moveStop(ids, from, to) { return this._period('/api/v3/vehicles/moveStop', ids, from, to); }
+  moveStop(ids, from, to, opts = {}) { return this._period('/api/v3/vehicles/moveStop', ids, from, to, {}, opts); }
   mileage(ids, from, to, sampling = 86400, opts = {}) { return this._period('/api/v3/vehicles/mileageAndMotohours', ids, from, to, { sampling }, opts); }
   fuel(ids, from, to, sampling = 86400, opts = {}) { return this._period('/api/v3/vehicles/fuelConsumption', ids, from, to, { sampling }, opts); }
   fuelInOut(ids, from, to, opts = {}) { return this._period('/api/v3/vehicles/fuelInOut', ids, from, to, {}, opts); }

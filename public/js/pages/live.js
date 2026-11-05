@@ -49,7 +49,7 @@ export default {
 
     function counts() {
       const c = { moving: 0, idle: 0, stopped: 0, offline: 0 };
-      for (const v of state.vehicles.values()) c[v.status]++;
+      for (const v of state.vehicles.values()) if (!v.cameraOnly) c[v.status]++;
       return c;
     }
 
@@ -62,6 +62,7 @@ export default {
     function visible() {
       const q = search.trim().toLowerCase().replace(/\s+/g, '');
       return [...state.vehicles.values()]
+        .filter((v) => !v.cameraOnly) // no tracker: nothing to show on a live map
         .filter((v) => !filter || v.status === filter)
         .filter((v) => !q || `${v.label} ${v.gpsName} ${v.plate || ''}`.toLowerCase().replace(/\s+/g, '').includes(q))
         .sort((a, b) => ORDER[a.status] - ORDER[b.status] || (b.speed || 0) - (a.speed || 0) || a.label.localeCompare(b.label));

@@ -19,6 +19,8 @@ const { Poller } = require('./src/gps/poller');
 const { Gate } = require('./src/gate');
 const { Analytics } = require('./src/analytics');
 const { Places } = require('./src/places');
+const { Trips } = require('./src/trips');
+const { PlateLinks } = require('./src/platelinks');
 const { Rules } = require('./src/rules');
 const { Push } = require('./src/push');
 const { Health, gpsFresh } = require('./src/health');
@@ -83,13 +85,15 @@ function build() {
   }
   const analytics = new Analytics({ h, gps, config, log });
   const places = new Places({ h, config, log });
+  const trips = new Trips({ h, gps, places, config, log });
+  const plateLinks = new PlateLinks({ h, analytics, trips, log });
   const rules = new Rules({ h, config, poller, gate, places, log });
   const push = new Push({ h, config, log });
   // In MOCK mode the internet probe is simulated too (see src/mock/sim.js mockFail).
   const probe = config.mock ? async () => ({ ok: require('./src/mock/sim').mockFail(config.dataDir) !== 'internet' }) : undefined;
   const health = new Health({ h, config, poller, gate, rules, log, ...(probe ? { probe } : {}) });
   const outbox = new Outbox({ h, log });
-  const ctx = { h, db, config, auth, gps, nvr, poller, gate, analytics, places, rules, push, health, sim, outbox, log };
+  const ctx = { h, db, config, auth, gps, nvr, poller, gate, analytics, places, trips, plateLinks, rules, push, health, sim, outbox, log };
   if (config.telegram.enabled) {
     const { Telegram } = require('./src/telegram');
     ctx.telegram = new Telegram(ctx);
@@ -149,6 +153,7 @@ async function start() {
   if (poller) poller.start();
   analytics.start();
   places.start();
+  ctx.trips.start();
   outbox.start();
   telegram?.start();
   if (gate) {
@@ -168,7 +173,7 @@ async function start() {
 
   const shutdown = (sig) => {
     log.info(`${sig}: shutting down`);
-    poller?.stop(); gate?.stop(); analytics.stop(); places.stop(); rules.stop(); health.stop(); outbox.stop(); telegram?.stop();
+    poller?.stop(); gate?.stop(); analytics.stop(); places.stop(); ctx.trips.stop(); rules.stop(); health.stop(); outbox.stop(); telegram?.stop();
     h.kvSet('alive_at', Date.now()); // the outage report after restart counts from this moment
     server.close(() => { ctx.db.close(); process.exit(0); });
     setTimeout(() => process.exit(0), 5000).unref();

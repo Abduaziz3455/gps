@@ -120,7 +120,7 @@ class Reports {
     const before = this.cfg.nvr.matchBeforeSec * 1000, after = this.cfg.nvr.exitConfirmMin * 60e3;
     const y = this.cfg.yard;
     const stats = new Map();
-    const rows = this.h.all(`SELECT g.*, v.name gps_name, v.plate v_plate, v.display, v.id vid FROM gate_events g JOIN vehicles v ON v.id = g.vehicle_id
+    const rows = this.h.all(`SELECT g.*, v.name gps_name, v.plate v_plate, v.display, v.id vid FROM gate_events g JOIN vehicles v ON v.camera_only = 0 AND v.id = g.vehicle_id
       WHERE g.t >= ? AND g.plate IS NOT NULL AND g.status IN ${COUNTED} ORDER BY g.t`, since);
     for (const g of rows) {
       const st = stats.get(g.plate) || { plate: g.plate, gpsName: g.gps_name, alias: plateKey(g.gps_name) !== g.plate, exits: 0, confirmed: 0, offsets: [], entries: 0, mismatches: [] };

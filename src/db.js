@@ -147,6 +147,47 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   fails      INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS gps_segments (      -- GoGPS's moves and stops, kept because it takes 48 s to ask (src/trips.js)
+  vehicle_id INTEGER NOT NULL,
+  start_t    INTEGER NOT NULL,
+  kind       TEXT NOT NULL,                -- move | stop
+  end_t      INTEGER NOT NULL,
+  km         REAL,
+  address    TEXT,
+  PRIMARY KEY (vehicle_id, start_t, kind)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS gps_segments_t ON gps_segments(start_t);
+CREATE TABLE IF NOT EXISTS gps_segment_days (day TEXT PRIMARY KEY, synced_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS trips (             -- worked out, never edited: can be deleted and rebuilt (src/trips.js)
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  vehicle_id   INTEGER NOT NULL,
+  day          TEXT NOT NULL,                -- the day it left, or came back when no exit was seen
+  start_t      INTEGER,                      -- NULL: no exit seen
+  end_t        INTEGER,                      -- NULL: on the road, or no return seen
+  start_src    TEXT,                         -- gps | camera
+  end_src      TEXT,
+  out_event    INTEGER,                      -- gate event with the photos
+  in_event     INTEGER,
+  km           REAL,
+  km_src       TEXT,                         -- gps | positions (GoGPS hasn't answered yet: comes out about 9% short)
+  far_m        INTEGER,                      -- farthest from the yard
+  near         INTEGER NOT NULL DEFAULT 0,   -- 1: never got away from the plant
+  stops        TEXT NOT NULL DEFAULT '[]',   -- JSON [{s, e, a: address, lat, lng, y: at the yard}]
+  refuel_l     REAL NOT NULL DEFAULT 0,
+  drain_l      REAL NOT NULL DEFAULT 0,
+  fuel_used    REAL,                         -- NULL: no fuel sensor, or not asked yet
+  fuel_checked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS trips_day ON trips(day);
+CREATE INDEX IF NOT EXISTS trips_v ON trips(vehicle_id, start_t);
+CREATE TABLE IF NOT EXISTS plate_links (       -- the owner's decision about a plate the cameras read (src/platelinks.js)
+  plate      TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,                  -- vehicle | outside
+  vehicle_id INTEGER,                        -- kind vehicle
+  created    INTEGER NOT NULL DEFAULT 0,     -- 1: the vehicle was made for this plate (no GPS tracker)
+  by_user    INTEGER,
+  at         INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS places (            -- areas the owner named, from a point where a truck stopped
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -199,6 +240,9 @@ CREATE TABLE IF NOT EXISTS tg_alerts (         -- what was sent for a gate event
 
 /** Columns added after the first release. CREATE TABLE IF NOT EXISTS doesn't touch a table that already exists. */
 const ADDED_COLUMNS = {
+  vehicles: {
+    camera_only: 'INTEGER NOT NULL DEFAULT 0', // 1: our truck with no GPS tracker, known by its plate alone
+  },
   gate_events: {
     top_view: 'TEXT',        // pending | done | none (looked, no vehicle) | failed; NULL: not wanted (history, no top view camera)
     top_view_note: 'TEXT',

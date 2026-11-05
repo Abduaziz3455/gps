@@ -50,7 +50,7 @@ export default {
             <div class="tiles grid-2" id="avgTiles"></div>
             <div class="grid grid-2">
               <section class="card"><div class="card-head"><h3>Masofa, km</h3><span class="muted small">oxirgi 14 kun</span></div><div class="card-body"><div id="chKm"></div></div></section>
-              <section class="card"><div class="card-head"><h3>Reyslar</h3><span class="muted small">oxirgi 14 kun</span></div><div class="card-body"><div id="chTrips"></div></div></section>
+              <section class="card"><div class="card-head"><h3>Reyslar</h3><span class="muted small">oxirgi 14 kun</span><span class="spacer"></span><a class="small" id="vTrips" href="#/reyslar?vehicle=${id}">Ro'yxat</a></div><div class="card-body"><div id="chTrips"></div></div></section>
             </div>
           </div>
           <aside class="grid" style="gap:16px">
@@ -116,7 +116,13 @@ export default {
     function renderLive() {
       const v = state.vehicles.get(id);
       const place = placeAt(v.lat, v.lng);
-      setHtml($('#vLive', main), html`${statusHtml(v.status)} <span class="muted small">${ago(v.recordTime)}</span>`);
+      setHtml($('#vLive', main), v.cameraOnly ? html`<span class="pill">Faqat kamera</span>` : html`${statusHtml(v.status)} <span class="muted small">${ago(v.recordTime)}</span>`);
+      if (v.cameraOnly) {
+        // No tracker: all that is known comes from the gate cameras.
+        setHtml($('#infoCard', main), html`<div class="card-head"><h2>Hozirgi holat</h2></div>
+          <div class="card-body"><dl class="kv">${v.plate ? html`<dt>Raqam</dt><dd><span class="plate-chip">${v.plate}</span></dd>` : ''}<dt>GPS</dt><dd>Yo'q: reyslar darvoza kameralari bo'yicha hisoblanadi</dd></dl></div>`);
+        return;
+      }
       setHtml($('#infoCard', main), html`
         <div class="card-head"><h2>Hozirgi holat</h2></div>
         <div class="card-body"><dl class="kv">
@@ -234,7 +240,7 @@ function picker(main) {
   main.innerHTML = String(html`<div class="page"><div class="card"><div class="card-head"><h2>Transportni tanlang</h2></div>
     <div class="table-wrap"><table class="table"><thead><tr><th>Transport</th><th>Holat</th><th class="num">Bugun reys</th><th class="num">Bugun km</th><th>Oxirgi signal</th></tr></thead>
     <tbody>${vs.map((v) => html`<tr class="clickable" data-id="${v.id}"><td>${typeIcon(v.type)} <b>${v.label}</b> ${v.gpsName !== v.label ? html`<span class="muted small">${v.gpsName}</span>` : ''}</td>
-      <td>${statusHtml(v.status)}</td><td class="num">${v.today.trips}</td><td class="num">${num(v.today.km, 1)}</td><td>${ago(v.recordTime)}</td></tr>`)}</tbody></table></div></div></div>`);
+      <td>${v.cameraOnly ? html`<span class="pill">Faqat kamera</span>` : statusHtml(v.status)}</td><td class="num">${v.today.trips}</td><td class="num">${num(v.today.km, 1)}</td><td>${ago(v.recordTime)}</td></tr>`)}</tbody></table></div></div></div>`);
   main.querySelector('tbody').addEventListener('click', (e) => { const r = e.target.closest('tr'); if (r) location.hash = `#/transport/${r.dataset.id}`; });
   return () => {};
 }

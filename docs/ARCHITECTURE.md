@@ -107,6 +107,8 @@ at once. Each event's state is in `gate_events.top_view`, so a restart carries o
 | `src/gate.js` | Camera pipeline: captures → decisions → gate events → GPS resolution → photos → notifications |
 | `src/analytics.js` | Daily per-vehicle totals (rollups) and every analytics query |
 | `src/places.js` | Named places on the map and the visits (reys) to them (section 6a) |
+| `src/trips.js` | The trip record: passes into trips, km, stops, destination (section 6b) |
+| `src/platelinks.js` | The owner's decisions about plates no vehicle has, with the evidence for them (section 6c) |
 | `src/rules.js` | Alert rules (section 7) |
 | `src/push.js` | Web Push subscriptions, per-device preferences, delivery, dead-subscription cleanup |
 | `src/cameras/topview.js` | The photo with the load, from the recording (section 2a) |
@@ -248,6 +250,52 @@ measuring again once there are some weeks of data.
 | Spot grouping 150 m | At 100 m the busiest site split (9 visits fell to 7); 200–300 m changed little (10–11) | Kept |
 | Must span several days | The two busiest sites by vehicles (7 and 5 trucks) were each used on one day | Dropped |
 | Minimum visits | ≥ 5 finds 3 sites, ≥ 3 finds 6, all with at least 2 trucks | 3, showing the 20 busiest |
+
+## 6b. Trips
+
+`src/trips.js`, the Reyslar page. One row per trip: left the yard, where it went, when it came back, km, fuel, photos of both
+passes. Rows are worked out, never edited, so they can be deleted and rebuilt (`trips_version` in `kv` does that when the rules change).
+
+**When it left and came back.** A trip runs from leaving the GPS circle to reaching it again, as the Telegram alerts count it. The camera's
+time is used only when GPS has none. The circle and the gate are different moments: on 5 Nov 2026 a truck passed the exit camera and stood in
+the circle for 5 h, and another reached the circle at 17:49 and the entry camera at 14:57 next day. So a camera pass joins the GPS crossing the
+same way with no crossing the opposite way between them, however long ago (up to 12 h out, 24 h in), rather than one within a short window. Two
+camera passes the same way are two passes: the one between them went unseen, and the row says "not recorded" instead of guessing.
+
+Left out, or marked, because of what the real month showed:
+
+| Case | Rule | Real example |
+|---|---|---|
+| Wobbling at the circle's edge | Out and back within 10 min with no camera pass: not a trip | out for 14 s |
+| Stayed by the plant | Never farther than 1 km, or under 2 km with no stop away: flagged "Hovli yonida", left out of counts unless asked for | 0.2 km in 2 h |
+| Days with no recordings | Over 24 h with 2+ stops on the plant's street: shown as an exit and a return, not one trip | 10-29 to 11-03, 491 km |
+| Real long trip | Stays one trip | 49 h, 13 km, 1 stop there |
+
+**Km and stops** come from GoGPS's moves and stops: positions came out 9% short (73.8 vs 80.7 km; the day's mileage report said 80.5). GoGPS takes about
+48 s to answer for one day of the fleet, so `gps_segments` stores it: today every 15 min, past days once, slowly, on a third lane of the GPS client (`bulk`) so
+it never delays an alert's report. Pages only read SQLite. Until the answer is in, km comes from positions and is shown with ≈. GoGPS has no coordinates in stops, so
+a stop's point comes from `positions` (since 3 Nov 2026); older stops are told apart by address, with the plant's street learned from stops whose point is known.
+
+**Where it went** is decided when a trip is read: the named place it stood at longest, else its longest stop away from the plant. So naming a place changes past
+trips at once. Many trackers give only "Ташкент" as the address, so naming places is what makes this column useful.
+
+**Fuel** is asked once per finished trip, only for a truck whose sensor reported that day (14 of 60 vehicle-days when written).
+
+**The count differs from "Reys" on the other pages on purpose.** That one is max(exits, entries) from the cameras alone. On the real month: 747 trips against 694, and within 15% on 21 of the 22 days
+the cameras recorded much. On days they recorded little it differs most: 33 trips against 0 on 4 Nov 2026. The page says so. Of the 747, 493 have both ends; the rest are mostly history from before the poller, when an unread exit left no trace.
+
+## 6c. Unknown plates
+
+`src/platelinks.js`, a card in Settings → Transportlar. Plates read often that no vehicle has count as outsiders, so their trips are missing from the reports (real: four plates
+were 18% of all passes in 14 days). Regulars (4+ passes on 2+ days in 30 days) are listed for the owner, who decides once per plate, and can undo:
+
+- **This GPS truck.** `plate_links` holds it rather than `vehicles.plate`, because setting `plate` turns off the "same digits and letters" match its usual reads rely on. Past passes move to the truck with status `history`.
+- **Our truck, no GPS.** A vehicle of its own (`camera_only`, ids from 1e9), counted by the cameras alone: no GPS check to wait for, no GPS lines in Telegram, not on the live map, not "signal lost".
+- **Not ours.** Stops asking, and learned matching can no longer claim it.
+
+The suggestion comes from local records and stays quiet when unsure: which truck left the circle when the plate passed the exit camera (since the poller began), then which truck stood on the plant's
+street at each pass (`gps_segments`, 90% of 10+ passes and 20 points ahead of the next truck). Checked on the 14 plates whose truck is known: 7 right, none wrong, 7 undecided. It found 10963DDA = 85 518 EBA (60 of 60, next 46).
+Some trackers only ever report "Ташкент", so "may have no tracker" is never stated as fact.
 
 ## 7. Alerts and push notifications
 
