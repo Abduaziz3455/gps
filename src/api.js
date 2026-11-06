@@ -492,6 +492,7 @@ function buildApi(ctx) {
       vehicles: () => { vmap = vehiclesById(); send('vehicles', {}); },
       places: () => send('places', {}),
       trips: () => send('trips', {}),
+      stats: (s) => send('stats', s),
       gate: (ev) => send('gate', ev),
       'gate:update': (ev) => send('gate:update', ev),
       alert: (a) => send('alert', a),

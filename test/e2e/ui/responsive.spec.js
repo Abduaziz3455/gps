@@ -103,6 +103,7 @@ for (const [name, width, height] of SCREENS) test.describe(name, () => {
 
 test('where the list sits: under the map on a phone, beside it from a tablet up', async ({ page, signIn }) => {
   await signIn('owner');
+  await expect(page.locator('.live-side')).toBeVisible(); // signing in doesn't wait for the map page to be drawn
   const beside = () => page.evaluate(() => document.querySelector('.live-side').getBoundingClientRect().right <= document.querySelector('.map-wrap').getBoundingClientRect().left + 1);
   for (const [w, h, want] of [[390, 844, false], [768, 1024, true], [1024, 768, true], [1920, 1080, true]]) {
     await page.setViewportSize({ width: w, height: h });

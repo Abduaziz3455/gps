@@ -131,6 +131,8 @@ class Analytics {
         if (r.changes) bus.emit('fuel', f);
       }
     });
+    // Open maps show today's trips and km from /api/vehicles: tell them to load it again.
+    if (day === T.today()) bus.emit('stats', { day });
   }
 
   /** Days in the last `days` that were never computed after they ended. */

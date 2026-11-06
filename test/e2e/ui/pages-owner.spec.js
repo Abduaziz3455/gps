@@ -64,6 +64,11 @@ test.describe('analytics', () => {
     await expect(page.locator('#anChart svg')).toBeVisible();
     await page.locator('#anChart g.col').last().hover({ force: true });
     await expect(page.locator('#anChart .tooltip')).toContainText('km');
+    // The number over a bar is part of the bar: hovering it shows the tooltip too.
+    await page.mouse.move(0, 0);
+    await expect(page.locator('#anChart .tooltip')).toBeHidden();
+    await page.locator('#anChart svg text[pointer-events="none"]').first().hover({ force: true });
+    await expect(page.locator('#anChart .tooltip')).toContainText('km');
   });
 
   test('an empty period: dashes and messages, not zeros pretending to be data, and no error', async ({ page, signIn }) => {

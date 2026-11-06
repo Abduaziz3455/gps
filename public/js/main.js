@@ -132,6 +132,16 @@ function wireLive() {
     state.emit('vehicles:changed', list.map((p) => p.id));
   });
   state.on('vehicles', () => loadVehicles().catch(() => {}));
+  // Today's trips and km on the map card come with the vehicle list, so reload it when they change.
+  state.on('stats', () => loadVehicles().catch(() => {}));
+  // Updates sent while the stream was down (a phone asleep, the network gone) are lost: load the list again when it's back,
+  // and every 5 minutes anyway, in case a change got by without telling anyone.
+  let streamWasDown = false;
+  state.on('stream', (ok) => {
+    if (!ok) streamWasDown = true;
+    else if (streamWasDown) { streamWasDown = false; loadVehicles().catch(() => {}); }
+  });
+  setInterval(() => { if (!document.hidden) loadVehicles().catch(() => {}); }, 5 * 60e3);
   state.on('places', () => loadPlaces().catch(() => {}));
   state.on('gate', (ev) => {
     if (ev.status === 'vetoed') return;

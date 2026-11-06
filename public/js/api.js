@@ -37,7 +37,7 @@ export function connectStream() {
   let es = null, retry = 2000;
   const open = () => {
     es = new EventSource('/api/stream');
-    for (const ev of ['hello', 'positions', 'vehicles', 'places', 'trips', 'gate', 'gate:update', 'alert', 'alert:update', 'health']) {
+    for (const ev of ['hello', 'positions', 'vehicles', 'places', 'trips', 'stats', 'gate', 'gate:update', 'alert', 'alert:update', 'health']) {
       es.addEventListener(ev, (e) => { retry = 2000; state.emit(ev, JSON.parse(e.data)); });
     }
     es.onopen = () => state.emit('stream', true);

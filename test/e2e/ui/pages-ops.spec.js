@@ -126,6 +126,55 @@ test.describe('live map', () => {
     await expect(page).toHaveURL(/#\/xarita$/);
   });
 
+  test("an open card's trips today go up when a trip is counted, without reloading the page", async ({ page, signIn, server, owner }) => {
+    // The silent tracker never goes through the gate in the simulator, so only this test's pass counts for it.
+    const id = gateEvent(server, { direction: 'out', plate: '10999ZZA', vehicleId: null, status: 'outside' });
+    const trips = page.locator('#drawer .mini-stats div', { hasText: 'Bugun reys' }).locator('b');
+    try {
+      await signIn('dispatcher', `xarita?v=${FLEET.dead}`);
+      await expect(page.locator('#drawer h2')).toBeVisible();
+      const before = Number(await trips.textContent());
+      // A dispatcher says whose pass it was: the day's totals are worked out again and the open card follows.
+      await owner.patch(`/api/gate-events/${id}`, { vehicleId: FLEET.dead });
+      await expect(trips).toHaveText(String(before + 1), { timeout: 15_000 });
+      await owner.patch(`/api/gate-events/${id}`, { hidden: true });
+      await expect(trips).toHaveText(String(before), { timeout: 15_000 });
+    } finally {
+      server.run('DELETE FROM gate_events WHERE id = ?', id);
+    }
+  });
+
+  test("a trip counted while the live stream was down is on the card once it's back", async ({ page, signIn, server, owner }) => {
+    const id = gateEvent(server, { direction: 'out', plate: '10998ZZA', vehicleId: null, status: 'outside' });
+    const trips = page.locator('#drawer .mini-stats div', { hasText: 'Bugun reys' }).locator('b');
+    // Chromium keeps a stream to localhost open even "offline": keep the page's streams within reach to cut one.
+    await page.addInitScript(() => {
+      const Original = window.EventSource;
+      window.__streams = [];
+      window.EventSource = class extends Original { constructor(...a) { super(...a); window.__streams.push(this); } };
+    });
+    try {
+      await signIn('dispatcher', `xarita?v=${FLEET.dead}`);
+      await expect(page.locator('#drawer h2')).toBeVisible();
+      const before = Number(await trips.textContent());
+      // The connection drops, as it does when a phone sleeps, and can't come back for now.
+      await page.route('**/api/stream', (r) => r.abort());
+      await page.evaluate(() => { const es = window.__streams.at(-1); es.close(); es.onerror(); });
+      await owner.patch(`/api/gate-events/${id}`, { vehicleId: FLEET.dead });
+      await page.waitForTimeout(7000); // the totals are worked out again 5 s after the change, and the page can't hear it
+      await expect(trips).toHaveText(String(before));
+      // Back: the list comes again at once. (Any later change would bring it too, so wait for it right after the stream.)
+      const back = page.waitForResponse((r) => r.url().endsWith('/api/stream') && r.ok(), { timeout: 40_000 });
+      await page.unroute('**/api/stream');
+      await back;
+      await expect(trips).toHaveText(String(before + 1), { timeout: 3000 });
+      await owner.patch(`/api/gate-events/${id}`, { hidden: true });
+      await expect(trips).toHaveText(String(before), { timeout: 15_000 });
+    } finally {
+      server.run('DELETE FROM gate_events WHERE id = ?', id);
+    }
+  });
+
   test('a direct link opens the card', async ({ page, signIn }) => {
     await signIn('dispatcher', `xarita?v=${FLEET.fuel}`);
     await expect(page.locator('#drawer h2')).toHaveText('85 450 KBA');

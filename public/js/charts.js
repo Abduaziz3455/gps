@@ -55,7 +55,8 @@ export function barChart(container, data, { height = 200, unit = '', labelEvery 
     const r = Math.min(4, bw / 2, bh);
     const path = bh > 0 ? `M${x},${pad.t + h} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${pad.t + h} Z` : '';
     s += `<g class="col" data-i="${i}"><rect class="bar-hit" x="${pad.l + slot * i}" y="${pad.t}" width="${slot}" height="${h}"/>${path ? `<path class="bar${d.dim ? ' dim' : ''}" d="${path}"/>` : ''}</g>`;
-    if (valueLabels && v > 0 && bw >= 18) s += `<text class="axis-text" x="${x + bw / 2}" y="${y - 4}" text-anchor="middle">${fmtTick(v)}</text>`;
+    // The label sits over the column: it mustn't take the mouse, or hovering a number hides the tooltip.
+    if (valueLabels && v > 0 && bw >= 18) s += `<text class="axis-text" pointer-events="none" x="${x + bw / 2}" y="${y - 4}" text-anchor="middle">${fmtTick(v)}</text>`;
     if (i % every === 0) s += `<text class="axis-text" x="${pad.l + slot * i + slot / 2}" y="${height - 8}" text-anchor="middle">${esc(d.label)}</text>`;
   });
   svg.innerHTML = s;
