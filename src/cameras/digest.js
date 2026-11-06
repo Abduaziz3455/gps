@@ -158,10 +158,19 @@ class DigestClient {
       const agent = this.agents[new URL(opts.url).protocol];
       return rawRequest({ ...opts, method, headers, agent, rejectUnauthorized: this.rejectUnauthorized });
     };
-    const res = await send();
-    const status = opts.stream ? res.statusCode : res.status;
-    if (status !== 401) return res;
-    const challenge = findChallenge(res);
+    const statusOf = (r) => (opts.stream ? r.statusCode : r.status);
+    let res = await send();
+    if (statusOf(res) !== 401) return res;
+    let challenge = findChallenge(res);
+    if (!challenge && this.challenge) {
+      // A Hikvision NVR that restarted no longer knows our nonce, and its 401 then carries no new challenge.
+      // Keeping the old one would fail every request from then on: forget it and ask again, unsigned.
+      if (opts.stream) await drain(res);
+      this.challenge = null;
+      res = await send();
+      if (statusOf(res) !== 401) return res;
+      challenge = findChallenge(res);
+    }
     if (opts.stream) await drain(res);
     if (!challenge) return res; // not a digest server; let the caller see the 401
     this.challenge = challenge;

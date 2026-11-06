@@ -52,6 +52,7 @@ function fakeNvr() {
     paths: [], // authenticated request paths
     stream: null, // (socket) => void, how to serve the alert stream
     qop: true,
+    bare: false, // like the real NVR after a restart: a request signed with a nonce it doesn't know gets a 401 with no challenge
   };
   const deny = (res) => {
     state.challenges += 1;
@@ -78,7 +79,13 @@ function fakeNvr() {
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {
-      if (!authOk(req)) return deny(res);
+      if (!authOk(req)) {
+        if (state.bare && req.headers.authorization) {
+          res.writeHead(401, { 'Content-Type': 'text/html' });
+          return res.end('<h2>Access Error: 401 -- Unauthorized</h2>');
+        }
+        return deny(res);
+      }
       const path = req.url;
       state.paths.push(path);
       if (path === '/ISAPI/System/deviceInfo') {
@@ -158,9 +165,35 @@ test('NVR client against a fake NVR', async (t) => {
     state.nonce = 'qop-again';
   });
 
+  await t.test('digest: after the NVR restarts, a 401 with no challenge makes the client ask for a new one', async () => {
+    state.bare = true;
+    try {
+      await nvr.deviceInfo(); // caches the current nonce
+      state.nonce = 'after-restart'; // the NVR restarted: it no longer knows the cached one
+      const before = state.challenges;
+      assert.match(await nvr.deviceInfo(), /DS-7716NXI-K4/);
+      assert.equal(state.challenges, before + 1, 'one unsigned request to get the new challenge');
+      assert.equal(state.ncSeen.at(-1), 1);
+      // The live event stream (the request that kept failing in production) recovers the same way.
+      state.nonce = 'after-second-restart';
+      const res = await nvr.client.request({ url: host + '/ISAPI/System/deviceInfo', stream: true, timeoutMs: 5000 });
+      assert.equal(res.statusCode, 200);
+      res.resume();
+      await nvr.deviceInfo();
+      assert.equal(state.ncSeen.at(-1), 2, 'the new challenge is kept for later requests');
+    } finally { state.bare = false; }
+  });
+
   await t.test('wrong password surfaces the 401', async () => {
     const bad = new NVR({ host, user: USER, password: 'nope', timeoutMs: 5000 });
     await assert.rejects(bad.deviceInfo(), (e) => e.status === 401);
+    // Also when the NVR answers bad signatures with a bare 401: no endless asking.
+    state.bare = true;
+    const before = state.challenges;
+    try {
+      await assert.rejects(bad.deviceInfo(), (e) => e.status === 401);
+      assert.equal(state.challenges, before + 1, 'one new challenge, then the 401 reaches the caller');
+    } finally { state.bare = false; }
     bad.close();
   });
 
