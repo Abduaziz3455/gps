@@ -384,3 +384,24 @@ Test period, after the app's misread correction (`plates.correct` against plates
 
 - **Chosen reader:** `~/plates-dataset/models/s_real/s_real.onnx`, with its config `s_real.yaml`. 5 MB.
 - **Detectors:** downloaded by open-image-models: `rf-detr-nano-384-coco` and `yolo-v9-t-384-license-plate-end2end`.
+
+## 10. Live from 7 Nov 2026: how it runs and what was measured on production
+
+- **Containers:** `tbb-plate-reader` (`reader/`) beside the app. Model files in `/root/gps-models` on the server, not in git.
+- **The app** (`src/cameras/ownreader.js`) asks the reader for new passes every 3 s.
+  - A pass waits 45 s for the camera's own capture. If none came, it becomes a gate event through the same tracker,
+    matching, GPS check and alerts as a camera capture.
+  - `gate_events.read_by` is `own`; the alert says "Raqamni o'z modelimiz videodan o'qidi".
+  - A camera capture with an unreadable plate is re-read (`read_by` `own-reread`).
+- **Watching:** each plate camera's sub stream (640×480) is decoded at 4 frames a second for motion. While
+  something moves, the main stream (2560×1440) is read at 4 frames a second.
+  - A plate counts when it is read the same in 2 or more frames, and moves at least 60 px across the picture.
+  - Parked vehicles don't count: on recorded passes, plates moved 281 px or more.
+- **Speed on production** (4-core Xeon, shared):
+  - 0.35 s per read on 2 threads; the vehicle detector is run every 4th frame, which brings frames in between down to about 0.1 s.
+  - About 10% of one core and 300 MB while idle; up to about 1 GB with both gates busy (limit 1.5 GB).
+- **Check on production with the live code path:** the NVR's recordings of past passes were fed in as if they were the live stream:
+  - 11 of 12 passes read right, 0 wrong. That's 9 passes in the main check plus 3 repeated after the last change.
+  - The one miss was read right in an earlier run.
+  - Unit tests: `test/ownreader.test.js`.
+- **Switch it off:** `READER_URL=` in `.env`, then `docker compose up -d app`. The gate then runs on the cameras alone, as before.
