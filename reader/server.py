@@ -11,7 +11,8 @@ Mode B, per plate camera:
     read whenever the reader is free. Measured on recorded passes (6 Nov 2026): at 4 frames a second our reader got
     36 of 39 plates right and none wrong, when a plate had to be read the same in 2 frames or more.
   - A pass is done when nothing has moved for a few seconds. Its plate is the one read most often, in 2 frames or
-    more, with confidence >= MIN_CONF and not cut off at the picture edge. The best frame goes with it.
+    more, with confidence >= MIN_CONF and not cut off at the picture edge, and it must have moved across the picture
+    (a parked vehicle read while a person walked by is not a pass). The best frame goes with it.
 
 Runs only on the app's private network; the RTSP address and password are never logged.
 """
@@ -37,9 +38,12 @@ MIN_CONF = float(os.environ.get('READER_MIN_CONF', '0.5'))
 MIN_VOTES = int(os.environ.get('READER_MIN_VOTES', '2'))
 FPS = 4
 MOTION_W, MOTION_H = 160, 90
-MOTION_SHARE = float(os.environ.get('READER_MOTION_SHARE', '0.02'))  # share of pixels that changed
+MOTION_SHARE = float(os.environ.get('READER_MOTION_SHARE', '0.01'))  # share of pixels that changed; real passes: 2.5-99%
 QUIET_S = 3.0           # a pass ends after this long without motion
 REUSE_FRAMES = 4        # vehicle boxes are reused for this many frames (1 s at 4 frames a second)
+# A plate must move this far across the picture during the pass. Measured on 36 recorded passes (6 Nov 2026): every
+# one moved 281 px or more; a parked vehicle's plate stays within a few px.
+MIN_MOVE_PX = 60
 MAX_PASS_S = 40.0       # a vehicle standing in view: close the pass, start again if it still moves
 FORMATS = [re.compile(r'^(\d{2})[A-Z]\d{3}[A-Z]{2}$'), re.compile(r'^(\d{2})\d{3}[A-Z]{3}$')]
 REGIONS = {'01', '10', '20', '25', '30', '40', '50', '60', '70', '75', '80', '85', '90', '95'}
@@ -169,7 +173,7 @@ class Watcher(threading.Thread):
         self.motion_until = now + QUIET_S
         with self.lock:
             if self.pass_ is None:
-                self.pass_ = {'start': now, 'votes': Counter(), 'best': {}, 'frames': 0, 'stop': threading.Event(),
+                self.pass_ = {'start': now, 'votes': Counter(), 'best': {}, 'at': {}, 'frames': 0, 'stop': threading.Event(),
                               'reader_done': threading.Event()}
                 threading.Thread(target=self._read_main, args=(self.pass_,), daemon=True, name=f'main-ch{self.channel}').start()
 
@@ -235,6 +239,8 @@ class Watcher(threading.Thread):
                 for r in reads:
                     if r['conf'] >= MIN_CONF and not r['cut'] and valid(r['plate']):
                         ps['votes'][r['plate']] += 1
+                        b = r['box']
+                        ps['at'].setdefault(r['plate'], []).append(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
                         b = ps['best'].get(r['plate'])
                         if b is None or r['conf'] > b['conf']:
                             ps['best'][r['plate']] = {'conf': r['conf'], 'jpg': jpg, 't': seen}
@@ -249,6 +255,12 @@ class Watcher(threading.Thread):
         plate, votes = ps['votes'].most_common(1)[0]
         if votes < MIN_VOTES:
             log.info('ch%s: %s read only %d time(s) in %d frames, not reported', self.channel, plate, votes, ps['frames'])
+            return
+        at = ps['at'][plate]
+        moved = max(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5 for a in at for b in at)
+        if moved < MIN_MOVE_PX:
+            # Something else moved (a person, a light), and a standing vehicle's plate was read: not a pass.
+            log.info('ch%s: %s did not move (%d px), not reported', self.channel, plate, moved)
             return
         b = ps['best'][plate]
         others = {k: v for k, v in ps['votes'].items() if k != plate}
