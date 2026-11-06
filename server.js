@@ -72,6 +72,7 @@ function build() {
 
   const poller = gps ? new Poller({ h, gps, config, log }) : null;
   let gate = null;
+  let ownReader = null;
   if (nvr) {
     const { Tracker } = require('./src/cameras/tracker');
     const plates = require('./src/cameras/plates');
@@ -82,6 +83,11 @@ function build() {
       fleetPlates: () => (gateRef ? gateRef.fleetPlates() : []),
     });
     gate = gateRef = new Gate({ h, nvr, poller, config, tracker, plates, topView, log });
+    if (config.reader.url) {
+      const { OwnReader } = require('./src/cameras/ownreader');
+      ownReader = new OwnReader(config.reader, { gate, h, log });
+      if (config.reader.reread) gate.ownReader = ownReader;
+    }
   }
   const analytics = new Analytics({ h, gps, config, log });
   const places = new Places({ h, config, log });
@@ -93,7 +99,7 @@ function build() {
   const probe = config.mock ? async () => ({ ok: require('./src/mock/sim').mockFail(config.dataDir) !== 'internet' }) : undefined;
   const health = new Health({ h, config, poller, gate, rules, log, ...(probe ? { probe } : {}) });
   const outbox = new Outbox({ h, log });
-  const ctx = { h, db, config, auth, gps, nvr, poller, gate, analytics, places, trips, plateLinks, rules, push, health, sim, outbox, log };
+  const ctx = { h, db, config, auth, gps, nvr, poller, gate, ownReader, analytics, places, trips, plateLinks, rules, push, health, sim, outbox, log };
   if (config.telegram.enabled) {
     const { Telegram } = require('./src/telegram');
     ctx.telegram = new Telegram(ctx);
@@ -168,12 +174,12 @@ async function start() {
       }
     });
     // Let the poller load the vehicle list first so plate matching works from the start.
-    setTimeout(() => gate.start().catch((e) => log.error(`camera pipeline: ${e.stack || e.message}`)), poller ? 4000 : 0);
+    setTimeout(() => gate.start().catch((e) => log.error(`camera pipeline: ${e.stack || e.message}`)).finally(() => ctx.ownReader?.start()), poller ? 4000 : 0);
   }
 
   const shutdown = (sig) => {
     log.info(`${sig}: shutting down`);
-    poller?.stop(); gate?.stop(); analytics.stop(); places.stop(); ctx.trips.stop(); rules.stop(); health.stop(); outbox.stop(); telegram?.stop();
+    poller?.stop(); ctx.ownReader?.stop(); gate?.stop(); analytics.stop(); places.stop(); ctx.trips.stop(); rules.stop(); health.stop(); outbox.stop(); telegram?.stop();
     h.kvSet('alive_at', Date.now()); // the outage report after restart counts from this moment
     server.close(() => { ctx.db.close(); process.exit(0); });
     setTimeout(() => process.exit(0), 5000).unref();

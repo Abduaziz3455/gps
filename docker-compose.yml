@@ -11,6 +11,7 @@ services:
       - NODE_ENV=production
       - PORT=8090
       - TZ=Asia/Tashkent
+      - READER_URL=${READER_URL-http://plate-reader:8091}   # set READER_URL= (empty) in .env to switch our reader off
     volumes:
       - ./data:/app/data             # dispatcher.db + photos/ (owned by uid 1000: sudo chown -R 1000:1000 data)
     dns:                             # this machine's own resolver (Tailscale) takes 560 ms an answer, these 60 ms
@@ -28,3 +29,31 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+
+  # Our own plate reader (reader/, docs/plate-recognition-plan.md): re-reads plates the cameras couldn't read, and
+  # reads the plate cameras' live video, so the gate keeps working when the cameras' own reading or the NVR fails.
+  plate-reader:
+    build: ./reader
+    container_name: tbb-plate-reader
+    restart: unless-stopped
+    environment:                     # only what it needs: the NVR address for the live video, no other secrets
+      - NVR_HOST=${NVR_HOST}
+      - NVR_USER=${NVR_USER:-admin}
+      - NVR_PASSWORD=${NVR_PASSWORD}
+      - NVR_RTSP_PORT=${NVR_RTSP_PORT:-554}
+      - READER_CHANNELS=${READER_CHANNELS:-3,4}   # the plate cameras
+      - TZ=Asia/Tashkent
+    volumes:
+      - ${READER_MODELS_DIR:-/root/gps-models}:/models:ro
+    expose:
+      - "8091"                       # only the app reaches it, on the compose network
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    cpus: 1.5                        # one read at a time on one core, plus decoding the cameras' video
+    mem_limit: 1g                    # measured about 420 MB for the models
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

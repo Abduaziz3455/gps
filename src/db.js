@@ -248,6 +248,9 @@ const ADDED_COLUMNS = {
     top_view_note: 'TEXT',
     top_view_tries: 'INTEGER NOT NULL DEFAULT 0',
     alert_state: 'TEXT',     // pending until the event is final (GPS decided, top view settled); then done
+    read_by: 'TEXT',         // NULL: the camera's read. own: our reader, from live video (the camera's capture was missing).
+                             // own-reread: our reader re-read the camera's picture, which the camera couldn't read
+    read_conf: 'REAL',       // our reader's confidence (weakest character), when it read the plate
   },
 };
 

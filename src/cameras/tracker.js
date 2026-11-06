@@ -74,7 +74,9 @@ class Tracker {
     const p = (sql) => db.prepare(sql);
     this.q = {
       addSighting: p('INSERT OR IGNORE INTO cam_sightings (name, channel, camera, time, plate) VALUES (?, ?, ?, ?, ?)'),
-      lastSighting: p('SELECT MAX(time) AS t FROM cam_sightings'),
+      // The cameras' own captures only: our reader's (own_...) are not the camera working.
+      lastSighting: p("SELECT MAX(time) AS t FROM cam_sightings WHERE name NOT LIKE 'own\\_%' ESCAPE '\\'"),
+      seen: p('SELECT 1 FROM cam_sightings WHERE name = ?'),
       recentReads: p('SELECT plate FROM cam_sightings WHERE channel = ? AND time >= ? AND time < ? '
         + 'AND plate IS NOT NULL ORDER BY time DESC'),
       presence: p('SELECT inside, last_seen, last_event FROM cam_presence WHERE plate = ?'),
@@ -93,6 +95,11 @@ class Tracker {
   /** Records a raw NVR capture. Returns false if this record was already processed. */
   addSighting(cap, cameraName) {
     return this.q.addSighting.run(cap.name, cap.channel, cameraName, cap.time, cap.plate ?? null).changes === 1;
+  }
+
+  /** True when this capture was processed before. */
+  seen(name) {
+    return !!this.q.seen.get(name);
   }
 
   /** Capture time (ms) of the newest processed NVR record; null for a fresh database. */

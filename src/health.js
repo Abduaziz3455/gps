@@ -135,7 +135,7 @@ function diagnose(obs) {
           text: `NVR ishlayapti, lekin ${what} kamerasi unga ulanmagan: kamera o'chgan, elektr yoki tarmoq kabeli uzilgan.${c.anpr ? ' Shu darvozadagi mashinalar qayd etilmayapti.' : ''}` });
       } else if (c.silent) {
         out.push({ key: `camera_silent:${c.channel}`, part: 'camera', severity: 'warning', title: `${what} kamerasi mashinalarni yozmayapti`,
-          text: `Oxirgi 90 daqiqada GPS bo'yicha ${c.silent.crossings} ta mashina ${c.role === 'kirish' ? 'kirdi' : 'chiqdi'}, kamera esa birortasini qayd etmadi. Kamera linzasi iflos, burilib qolgan yoki raqam aniqlash o'chgan bo'lishi mumkin.` });
+          text: `Oxirgi 90 daqiqada GPS bo'yicha ${c.silent.crossings} ta mashina ${c.role === 'kirish' ? 'kirdi' : 'chiqdi'}, kamera esa birortasini qayd etmadi. Kamera linzasi iflos, burilib qolgan yoki raqam aniqlash o'chgan bo'lishi mumkin.${c.silent.own ? ` Bu vaqtda o'z modelimiz videodan ${c.silent.own} ta mashinani o'qidi: darvoza qayd etishda davom etyapti, lekin kamera yoki NVR ni tekshirish kerak.` : ''}` });
       }
     }
   }
@@ -228,8 +228,9 @@ class Health {
       const col = c.direction === 'in' ? 'enter_t' : 'exit_t';
       const crossings = this.h.get(`SELECT COUNT(*) n FROM yard_visits WHERE ${col} BETWEEN ? AND ? ${c.direction === 'in' ? 'AND approx = 0' : ''}`, from, to).n;
       if (crossings < SILENT_MIN_CROSSINGS) continue;
-      const caps = this.h.get('SELECT COUNT(*) n FROM cam_sightings WHERE channel = ? AND time BETWEEN ? AND ?', c.channel, from - 2 * 60e3, now).n;
-      if (caps === 0) c.silent = { crossings };
+      // Only the camera's own captures count: our reader covering for it (own_...) is not the camera working.
+      const n = (own) => this.h.get(`SELECT COUNT(*) n FROM cam_sightings WHERE channel = ? AND time BETWEEN ? AND ? AND name ${own ? '' : 'NOT '}LIKE 'own\\_%' ESCAPE '\\'`, c.channel, from - 2 * 60e3, now).n;
+      if (n(false) === 0) c.silent = { crossings, own: n(true) };
     }
     return cams;
   }

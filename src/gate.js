@@ -147,12 +147,34 @@ class Gate {
     for (const cap of caps) {
       const cam = this.cameras.get(cap.channel);
       if (!cam) continue;
+      if (mode === 'live') await this.reread(cap);
       const d = this.tracker.process(cap, cam);
       if (!d) continue;
       n++;
       if (d.emit) await this.onDecision(d, mode);
     }
     return n;
+  }
+
+  /**
+   * Mode A (src/cameras/ownreader.js): a new camera capture the camera couldn't read is read again by our reader from
+   * the camera's own picture. The camera's read is kept for plate_raw.
+   */
+  async reread(cap) {
+    if (!this.ownReader || this.tracker.seen(cap.name)) return;
+    const raw = this.plates.normalize(cap.plate);
+    if (raw && this.plates.isValid(raw)) return;
+    try {
+      cap.picture = await this.nvr.captureImage(cap);
+      const r = await this.ownReader.reread(cap.picture);
+      if (!r) return;
+      this.log.info?.(`own reader re-read ${cap.name}: ${r.plate} (camera: ${cap.plate || 'nothing'}, conf ${r.conf})`);
+      cap.cameraPlate = cap.plate ?? null;
+      cap.plate = r.plate;
+      cap.reread = { conf: r.conf };
+    } catch (e) {
+      this.log.warn?.(`own reader re-read ${cap.name}: ${this.safeError(e)}`);
+    }
   }
 
   /** An NVR error for people to read: network errors carry the plant's address, which stays on the server. */
@@ -180,11 +202,13 @@ class Gate {
     const live = mode !== 'history';
     const topView = live && this.topView && d.camera.topView && d.camera.contextChannel ? 'pending' : null;
     const r = this.h.run(`INSERT OR IGNORE INTO gate_events (capture_name, t, direction, camera, channel, plate, plate_raw,
-      plate_valid, vehicle_id, identified_by, status, status_note, stay_s, gap, capture_uri, resolve_at, created_at, top_view, alert_state)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    cap.name, cap.time, d.direction, d.camera.name, cap.channel, d.plate, d.raw, d.valid ? 1 : 0,
+      plate_valid, vehicle_id, identified_by, status, status_note, stay_s, gap, capture_uri, resolve_at, created_at, top_view, alert_state,
+      read_by, read_conf)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    cap.name, cap.time, d.direction, d.camera.name, cap.channel, d.plate, cap.reread ? this.plates.normalize(cap.cameraPlate) : d.raw, d.valid ? 1 : 0,
     m?.vehicle.id ?? null, m?.how ?? null, status, cameraOnly && live ? CAMERA_ONLY_NOTE : null, d.staySeconds ?? null, d.gap ? 1 : 0, cap.uriPath || null, resolveAt, now,
-    topView, live ? 'pending' : null);
+    topView, live ? 'pending' : null,
+    cap.own ? 'own' : cap.reread ? 'own-reread' : null, cap.own?.conf ?? cap.reread?.conf ?? null);
     if (!r.changes) return;
     const id = Number(r.lastInsertRowid);
     if (mode === 'history') return;
@@ -207,7 +231,8 @@ class Gate {
       fs.writeFileSync(path.join(this.photoDir, file), await shrink(buf));
       photos.push({ name, file });
     };
-    try { await save(d.camera.name, await this.nvr.captureImage(cap), 1); } catch (e) { this.log.warn?.(`capture image: ${e.message}`); }
+    // Our reader's captures bring the frame it read; a re-read capture already has the camera's picture.
+    try { await save(d.camera.name, cap.own?.jpeg || cap.picture || await this.nvr.captureImage(cap), 1); } catch (e) { this.log.warn?.(`capture image: ${e.message}`); }
     if (d.camera.contextChannel && Date.now() - cap.time <= FRESH_MS) {
       try { await save(d.camera.contextName || `ch${d.camera.contextChannel}`, await this.nvr.snapshot(d.camera.contextChannel), 2); } catch (e) { this.log.warn?.(`snapshot: ${e.message}`); }
     }
@@ -573,6 +598,7 @@ class Gate {
       searchOk: this.searchOk,
       error: this.lastError,
       lastCapture: this.tracker.lastSightingTime(),
+      ownReader: this.ownReader ? this.ownReader.health() : null,
     };
   }
 }
@@ -613,6 +639,8 @@ function view(row, h) {
     staySeconds: row.stay_s,
     gap: !!row.gap,
     topView: row.top_view,
+    readBy: row.read_by || 'camera',
+    readConf: row.read_conf ?? null,
     photos: Array.from({ length: nPhotos }, (_, i) => ({ name: photos[i]?.name || row.camera, url: `/api/gate-events/${row.id}/photo/${i}${photos[i]?.v ? `?v=${photos[i].v}` : ''}` })),
   };
 }

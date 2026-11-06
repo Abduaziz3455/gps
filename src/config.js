@@ -89,6 +89,14 @@ const config = {
     ffprobe: env.FFPROBE_PATH || 'ffprobe',
   },
 
+  // Our own plate reader (reader/, src/cameras/ownreader.js). Empty URL: off, the cameras' reads only.
+  reader: {
+    url: (env.READER_URL || '').replace(/\/$/, ''),
+    holdSec: num(env.READER_HOLD_SECONDS, 45),   // how long a video read waits for the camera's own capture
+    minConf: num(env.READER_MIN_CONF, 0.5),      // reads below this are dropped (measured: 0.5 adds no wrong plates)
+    reread: bool(env.READER_REREAD, true),       // mode A: re-read captures the camera couldn't read
+  },
+
   telegram: {
     token: env.TELEGRAM_BOT_TOKEN || '',
     apiBase: (env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/$/, ''),
