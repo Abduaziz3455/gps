@@ -52,14 +52,19 @@ class Reader:
         self.ocr = LicensePlateRecognizer(onnx_model_path=os.path.join(models, 'plates_uz.onnx'),
                                           plate_config_path=os.path.join(models, 'plates_uz.yaml'), providers=p, sess_options=_opts(threads))
 
-    def boxes(self, img):
-        """Plate boxes [x1, y1, x2, y2, conf], best first."""
+    def vehicles(self, img):
+        """Up to 3 vehicle boxes [x1, y1, x2, y2], largest first."""
+        vs = [v.bounding_box for v in self.vehicle.predict(img) if v.label in VEHICLES]
+        vs = sorted(vs, key=lambda b: -(b.x2 - b.x1) * (b.y2 - b.y1))[:3]
+        return [[b.x1, b.y1, b.x2, b.y2] for b in vs]
+
+    def boxes(self, img, vehicles=None):
+        """Plate boxes [x1, y1, x2, y2, conf], best first. `vehicles`: boxes from an earlier frame of the same
+        video, so the vehicle detector (most of the time of a read) needn't run on every frame."""
         found = []
-        vs = [v for v in self.vehicle.predict(img) if v.label in VEHICLES]
-        vs = sorted(vs, key=lambda v: -(v.bounding_box.x2 - v.bounding_box.x1) * (v.bounding_box.y2 - v.bounding_box.y1))[:3]
-        for v in vs:
-            b = v.bounding_box
-            x1, y1, x2, y2 = max(0, b.x1), max(0, b.y1), min(img.shape[1], b.x2), min(img.shape[0], b.y2)
+        vs = self.vehicles(img) if vehicles is None else vehicles
+        for b in vs:
+            x1, y1, x2, y2 = max(0, int(b[0])), max(0, int(b[1])), min(img.shape[1], int(b[2])), min(img.shape[0], int(b[3]))
             if x2 - x1 < 32 or y2 - y1 < 32:
                 continue
             for p in self.plate.predict(img[y1:y2, x1:x2]):
@@ -84,11 +89,11 @@ class Reader:
                 kept.append(d)
         return kept[:4]
 
-    def read(self, img):
+    def read(self, img, vehicles=None):
         """[{plate, conf, det, box, cut}] for every plate box in a BGR picture (already without the text strip)."""
         out = []
         H, W = img.shape[:2]
-        for x1, y1, x2, y2, det in self.boxes(img):
+        for x1, y1, x2, y2, det in self.boxes(img, vehicles):
             w, h = x2 - x1, y2 - y1
             a, b = max(0, int(x1 - w * 0.05)), max(0, int(y1 - h * 0.05))
             c, d = min(W, int(x2 + w * 0.05)), min(H, int(y2 + h * 0.05))

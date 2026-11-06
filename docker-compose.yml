@@ -42,6 +42,7 @@ services:
       - NVR_PASSWORD=${NVR_PASSWORD}
       - NVR_RTSP_PORT=${NVR_RTSP_PORT:-554}
       - READER_CHANNELS=${READER_CHANNELS:-3,4}   # the plate cameras
+      - READER_THREADS=2
       - TZ=Asia/Tashkent
     volumes:
       - ${READER_MODELS_DIR:-/root/gps-models}:/models:ro
@@ -50,8 +51,11 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
-    cpus: 1.5                        # one read at a time on one core, plus decoding the cameras' video
-    mem_limit: 1g                    # measured about 420 MB for the models
+    cpus: 2.5                        # one read at a time on 2 threads (350 ms a picture; 1 thread: 570 ms), plus decoding
+                                     # the cameras' video. Idle it uses about 8% of one core
+    mem_limit: 1536m                 # measured on production 7 Nov 2026: models 460 MB, a sub-stream decoder 72 MB per
+                                     # camera, a full-resolution one 205 MB while a vehicle passes: both gates busy at once
+                                     # is about 1 GB. Usual use is about 600 MB
     logging:
       driver: json-file
       options:

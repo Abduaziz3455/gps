@@ -39,6 +39,7 @@ FPS = 4
 MOTION_W, MOTION_H = 160, 90
 MOTION_SHARE = float(os.environ.get('READER_MOTION_SHARE', '0.02'))  # share of pixels that changed
 QUIET_S = 3.0           # a pass ends after this long without motion
+REUSE_FRAMES = 4        # vehicle boxes are reused for this many frames (1 s at 4 frames a second)
 MAX_PASS_S = 40.0       # a vehicle standing in view: close the pass, start again if it still moves
 FORMATS = [re.compile(r'^(\d{2})[A-Z]\d{3}[A-Z]{2}$'), re.compile(r'^(\d{2})\d{3}[A-Z]{3}$')]
 REGIONS = {'01', '10', '20', '25', '30', '40', '50', '60', '70', '75', '80', '85', '90', '95'}
@@ -66,14 +67,25 @@ class Engine:
         self.reads = 0
         self.ms = deque(maxlen=200)
 
-    def read(self, img):
+    def read(self, img, vehicles=None):
         with self.lock:
             t0 = time.perf_counter()
-            out = self.reader.read(pipeline.scene(img))
+            out = self.reader.read(pipeline.scene(img), vehicles)
             ms = (time.perf_counter() - t0) * 1000
             self.reads += 1
             self.ms.append(ms)
             return out, ms
+
+    def vehicles(self, img):
+        """Vehicle boxes, grown 15% each way: in a quarter of a second the vehicle moves on a little."""
+        with self.lock:
+            img = pipeline.scene(img)
+            H, W = img.shape[:2]
+            out = []
+            for x1, y1, x2, y2 in self.reader.vehicles(img):
+                dx, dy = (x2 - x1) * 0.15, (y2 - y1) * 0.15
+                out.append([max(0, x1 - dx), max(0, y1 - dy), min(W, x2 + dx), min(H, y2 + dy)])
+            return out
 
 
 class Passes:
@@ -202,6 +214,7 @@ class Watcher(threading.Thread):
         threading.Thread(target=pump, daemon=True).start()
         try:
             seen = 0.0
+            vehicles, reuse = None, 0
             while not ps['stop'].is_set():
                 if latest['t'] <= seen:
                     time.sleep(0.05)
@@ -210,7 +223,14 @@ class Watcher(threading.Thread):
                 img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
                 if img is None:
                     continue
-                reads, _ = self.engine.read(img)
+                # The vehicle detector is most of a read: run it every few frames and reuse its boxes in between,
+                # and at once again when the reused boxes show no plate.
+                if vehicles is None or reuse >= REUSE_FRAMES:
+                    vehicles, reuse = self.engine.vehicles(img), 0
+                reads, _ = self.engine.read(img, vehicles)  # [] (no vehicle): whole frame and quarters
+                reuse += 1
+                if not any(r['conf'] >= MIN_CONF for r in reads):
+                    vehicles = None
                 ps['frames'] += 1
                 for r in reads:
                     if r['conf'] >= MIN_CONF and not r['cut'] and valid(r['plate']):
