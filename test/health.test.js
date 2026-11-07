@@ -25,12 +25,10 @@ test('diagnosis names the broken link', () => {
   assert.deepEqual(keys({ nvr: { ok: false, kind: 'auth' } }), ['nvr_auth']);
   assert.deepEqual(keys({ nvr: { ok: false, kind: 'http', status: 500 } }), ['nvr_error']);
   // cameras (only judged while the NVR answers)
-  const cams = [{ channel: 4, name: 'ANPR-1', role: 'kirish', anpr: true, offline: true }, { channel: 3, name: 'ANPR-2', role: 'chiqish', anpr: true, silent: { crossings: 6 } }];
-  assert.deepEqual(keys({ cameras: cams }), ['camera_offline:4', 'camera_silent:3']);
+  const cams = [{ channel: 4, name: 'ANPR-1', role: 'kirish', anpr: true, offline: true }, { channel: 3, name: 'ANPR-2', role: 'chiqish', anpr: true, offline: false }];
+  assert.deepEqual(keys({ cameras: cams }), ['camera_offline:4']);
   assert.deepEqual(keys({ cameras: cams, nvr: { ok: false, kind: 'refused' } }), ['nvr_down']);
   assert.deepEqual(keys({ diskFreeBytes: 0.5 * 1024 ** 3, diskFreeShare: 0.01 }), ['disk_low']);
-  const silent = diagnose({ ...ok, cameras: [cams[1]] })[0];
-  assert.match(silent.text, /6 ta mashina chiqdi/);
 });
 
 test('error classification', () => {
@@ -102,17 +100,14 @@ test('gpsFresh: GoGPS answered lately; never answered, or silent for three polls
   assert.equal(gpsFresh(now - 240_000, 60, now), false);
 });
 
-test("a camera whose plates our reader reads from its video is not 'not recording vehicles'", async () => {
+test("a camera that reads no plates itself is never a warning: its video is recorded and our reader reads it", async () => {
   const db = open(':memory:');
   const h = helpers(db);
-  const tracker = new (require('../src/cameras/tracker').Tracker)(db, { fleetPlates: () => new Map() });
   const cfg = { ...config, nvr: { ...config.nvr, cameras: [{ channel: 3, name: 'ANPR-2', direction: 'out', contextChannel: null }] }, rules: { ...config.rules, workHours: '06:00-22:00' } };
   const health = new Health({ h, config: cfg, rules: new Rules({ h, config }), gate: { nvr: {} }, log: {} });
-  const now = Date.parse('2026-11-07T07:00:00Z'); // 12:00 local
+  const now = Date.parse('2026-11-07T16:30:00Z'); // 21:30 local, as the alert the user got
   h.run('INSERT INTO vehicles (id, name, updated_at) VALUES (1, ?, ?)', 'A', now);
   for (const m of [80, 60, 40, 20]) h.run('INSERT INTO yard_visits (vehicle_id, enter_t, exit_t, approx) VALUES (1, ?, ?, 0)', now - m * 60e3 - 600e3, now - m * 60e3);
-  const silent = async () => (await health.cameraState(now))[0].silent;
-  assert.deepEqual(await silent(), { crossings: 4 }, 'nothing read from the camera while trucks left: a real fault');
-  tracker.addSighting({ name: 'own_3_1', channel: 3, time: now - 30 * 60e3, plate: '85450KBA' }, 'ANPR-2');
-  assert.equal(await silent(), null, 'our reader read a plate from its video: the gate is recorded');
+  const cams = await health.cameraState(now);
+  assert.deepEqual(diagnose({ internet: true, nvr: { ok: true }, cameras: cams }).map((p) => p.key), [], 'GPS crossings with no plate read: no warning');
 });

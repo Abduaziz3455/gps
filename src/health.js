@@ -32,8 +32,6 @@ const T = require('./time');
 const CHECK_MS = Math.max(5, Number(process.env.HEALTH_CHECK_SECONDS) || 60) * 1000;
 const CONFIRM_CHECKS = 3;
 const RECOVER_CHECKS = 2;
-const SILENT_WINDOW_MS = 90 * 60e3;
-const SILENT_MIN_CROSSINGS = 3;
 const ALIVE_EVERY_MS = 30e3;
 const DOWN_AFTER_MS = 3 * 60e3;
 
@@ -84,7 +82,9 @@ const CAM_ROLE = { in: 'kirish', out: 'chiqish' };
 /**
  * Observations -> problems (pure; tested). Each problem: {key, part, severity, title, text}.
  * obs: {internet: bool, gps: null|{ok, error}, nvr: null|{ok, kind, status}, router: null|bool,
- *       cameras: [{channel, name, role, offline, silent: null|{crossings}}] (silent: no plate read from it, by it or by our reader), diskFreeBytes, diskFreeShare}
+ *       cameras: [{channel, name, role, offline}], diskFreeBytes, diskFreeShare}
+ * There is no "camera reads no plates" warning (removed 7 Nov 2026): the cameras record video and our reader reads
+ * plates from it, so a camera that reads nothing itself is not a fault. Only a camera the NVR reports unplugged is.
  */
 function diagnose(obs) {
   const out = [];
@@ -133,9 +133,6 @@ function diagnose(obs) {
       if (c.offline) {
         out.push({ key: `camera_offline:${c.channel}`, part: 'camera', severity: c.anpr ? 'critical' : 'warning', title: `${what} kamerasi o'chgan`,
           text: `NVR ishlayapti, lekin ${what} kamerasi unga ulanmagan: kamera o'chgan, elektr yoki tarmoq kabeli uzilgan.${c.anpr ? ' Shu darvozadagi mashinalar qayd etilmayapti.' : ''}` });
-      } else if (c.silent) {
-        out.push({ key: `camera_silent:${c.channel}`, part: 'camera', severity: 'warning', title: `${what} kamerasi mashinalarni yozmayapti`,
-          text: `Oxirgi 90 daqiqada GPS bo'yicha ${c.silent.crossings} ta mashina ${c.role === 'kirish' ? 'kirdi' : 'chiqdi'}, lekin bu kameradan birorta raqam o'qilmadi (na kameraning o'zi, na o'z modelimiz videodan). Kamera linzasi iflos, burilib qolgan yoki video kelmayapti bo'lishi mumkin.` });
       }
     }
   }
@@ -203,7 +200,7 @@ class Health {
     return obs;
   }
 
-  /** Per configured camera: offline (NVR channel status, every 5 min) and "reads nothing" (GPS cross-check). */
+  /** Per configured camera: offline (NVR channel status, every 5 min). */
   async cameraState(now) {
     const cams = [];
     for (const c of this.cfg.nvr.cameras) {
@@ -215,24 +212,9 @@ class Health {
         const st = await this.gate.nvr.channelStatus();
         this.offline = new Set(Object.entries(st).filter(([, online]) => online === false).map(([id]) => Number(id)));
         this.channelStatusAt = now;
-      } catch { /* older firmware: no channel status; the GPS cross-check still works */ }
+      } catch { /* older firmware: no channel status */ }
     }
-    const [wa, wb] = this.cfg.rules.workHours.split('-').map(T.parseHm);
-    const m = T.minuteOfDay(now);
-    const workTime = m >= wa + 90 && m < wb; // a full 90-min window inside working hours
-    for (const c of cams) {
-      c.offline = this.offline.has(c.channel);
-      c.silent = null;
-      if (!c.anpr || c.offline || !workTime) continue;
-      const from = now - SILENT_WINDOW_MS, to = now - 2 * 60e3; // GPS runs behind; leave the last minutes out
-      const col = c.direction === 'in' ? 'enter_t' : 'exit_t';
-      const crossings = this.h.get(`SELECT COUNT(*) n FROM yard_visits WHERE ${col} BETWEEN ? AND ? ${c.direction === 'in' ? 'AND approx = 0' : ''}`, from, to).n;
-      if (crossings < SILENT_MIN_CROSSINGS) continue;
-      // A plate read from this camera counts, by the camera itself or by our reader from its video (own_...): the gate
-      // is being recorded either way. Only when neither read anything is something really wrong.
-      const n = this.h.get('SELECT COUNT(*) n FROM cam_sightings WHERE channel = ? AND time BETWEEN ? AND ?', c.channel, from - 2 * 60e3, now).n;
-      if (n === 0) c.silent = { crossings };
-    }
+    for (const c of cams) c.offline = this.offline.has(c.channel);
     return cams;
   }
 
@@ -252,7 +234,7 @@ class Health {
       a.fails++;
       a.oks = 0;
       this.active.set(p.key, a);
-      const need = p.key.startsWith('camera_silent') || p.key === 'disk_low' ? 1 : CONFIRM_CHECKS;
+      const need = p.key === 'disk_low' ? 1 : CONFIRM_CHECKS;
       if (!a.raised && a.fails >= need) {
         a.raised = true;
         this.raise(p, a.since, now);

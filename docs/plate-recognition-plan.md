@@ -173,7 +173,7 @@ our reader is better before relying on it.
 | Situation | What the reader does |
 |---|---|
 | Normal | Mode A on weak reads only |
-| A plate camera silent (health `camera_silent`), or the recorder rejecting plate pictures | Mode B for that camera until captures return |
+| A plate camera silent, or the recorder rejecting plate pictures | Mode B (as built, mode B always runs; the `camera_silent` alert was removed) |
 | Our reader measured better than the camera (after section 6, step 4) | Both read every pass, and the stronger read decides |
 
 A new health check for rejected plate pictures is part of this work. The recorder logs `Exception/vcaPicLengthOverFlow`,
@@ -435,3 +435,7 @@ Test period, after the app's misread correction (`plates.correct` against plates
 - **Watch:** `/health` of the reader gives per camera `passes_live`, `passes_recording`, `rereads`, `rereads_found`,
   `rereads_empty`, `rereads_failed`. Log lines: `pass chN … from the recording`, `recording HH:MM:SS: no plate read twice`.
 - **Tests:** `python -m unittest reader/test_server.py` (the reader's pass decisions; needs the reader's Python packages).
+- **Camera warnings removed (7 Nov 2026, user's decision):** the health check "ANPR-n kamerasi mashinalarni yozmayapti"
+  (`camera_silent`: GPS saw trucks cross, no plate read) is gone. The cameras record video and our reader reads it, so a
+  camera that reads nothing itself is not a fault, and GPS crossings at night are often trucks on the public road. Only
+  "kamerasi o'chgan" (the NVR reports the camera unplugged) remains. Mode B is always on, not switched by that alert.
