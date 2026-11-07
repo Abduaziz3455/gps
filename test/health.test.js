@@ -101,3 +101,18 @@ test('gpsFresh: GoGPS answered lately; never answered, or silent for three polls
   assert.equal(gpsFresh(now - 200_000, 60, now), true, 'a slower poll gets more time');
   assert.equal(gpsFresh(now - 240_000, 60, now), false);
 });
+
+test("a camera whose plates our reader reads from its video is not 'not recording vehicles'", async () => {
+  const db = open(':memory:');
+  const h = helpers(db);
+  const tracker = new (require('../src/cameras/tracker').Tracker)(db, { fleetPlates: () => new Map() });
+  const cfg = { ...config, nvr: { ...config.nvr, cameras: [{ channel: 3, name: 'ANPR-2', direction: 'out', contextChannel: null }] }, rules: { ...config.rules, workHours: '06:00-22:00' } };
+  const health = new Health({ h, config: cfg, rules: new Rules({ h, config }), gate: { nvr: {} }, log: {} });
+  const now = Date.parse('2026-11-07T07:00:00Z'); // 12:00 local
+  h.run('INSERT INTO vehicles (id, name, updated_at) VALUES (1, ?, ?)', 'A', now);
+  for (const m of [80, 60, 40, 20]) h.run('INSERT INTO yard_visits (vehicle_id, enter_t, exit_t, approx) VALUES (1, ?, ?, 0)', now - m * 60e3 - 600e3, now - m * 60e3);
+  const silent = async () => (await health.cameraState(now))[0].silent;
+  assert.deepEqual(await silent(), { crossings: 4 }, 'nothing read from the camera while trucks left: a real fault');
+  tracker.addSighting({ name: 'own_3_1', channel: 3, time: now - 30 * 60e3, plate: '85450KBA' }, 'ANPR-2');
+  assert.equal(await silent(), null, 'our reader read a plate from its video: the gate is recorded');
+});

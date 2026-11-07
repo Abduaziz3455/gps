@@ -331,7 +331,7 @@ knows whom to call:
 | Nothing answers, no router probe configured | "Zavoddagi kameralarga ulanib bo'lmayapti" — internet, power or NVR, internet first | plant |
 | NVR refuses the password | "NVR parolni qabul qilmadi" | owner: update `NVR_PASSWORD` |
 | NVR says a camera channel is offline | "ANPR-1 kamerasi o'chgan" — camera power/cable | plant: camera |
-| GPS saw ≥ 3 trucks cross the gate in 90 min, the camera recorded none | "ANPR-2 kamerasi mashinalarni yozmayapti" — dirty/turned lens, ANPR off | plant: camera |
+| GPS saw ≥ 3 trucks cross the gate in 90 min, and no plate was read from that camera: neither by the camera nor by our reader from its video (since 7 Nov 2026 our reads count, so a camera whose own reading fails while its video is read is not a fault) | "ANPR-2 kamerasi mashinalarni yozmayapti" — dirty/turned lens, no video | plant: camera |
 | Disk < 1 GB or < 5% | "Serverda joy tugayapti" | owner / hosting |
 | This server was off (heartbeat gap > 3 min) | "Dispatcher tizimi ishlamay qoldi: 10:02–10:15", reported after restart | — |
 
