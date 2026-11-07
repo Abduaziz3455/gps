@@ -213,7 +213,8 @@ class Gate {
     const id = Number(r.lastInsertRowid);
     if (mode === 'history') return;
 
-    if (now - cap.time <= FRESH_MS + this.ncfg.pollSeconds * 1000) await this.fetchPhotos(id, d).catch((e) => this.log.warn?.(`photos for ${cap.name}: ${e.message}`));
+    // Our reader's frame comes with the capture, however late (a pass read again from the recording comes 1.5-2 min after).
+    if (cap.own || now - cap.time <= FRESH_MS + this.ncfg.pollSeconds * 1000) await this.fetchPhotos(id, d).catch((e) => this.log.warn?.(`photos for ${cap.name}: ${e.message}`));
     const ev = this.get(id);
     bus.emit('gate', ev);
     // Entries of known vehicles and outside vehicles go out at once; the rest after GPS resolution.

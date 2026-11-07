@@ -27,8 +27,6 @@ function plateLine(ev) {
   let line = `🔢 <b>${escape(prettyPlate(ev.plate))}</b>`;
   if (ev.plateRaw && ev.plateRaw !== ev.plate) line += `  <i>(o'qildi: ${escape(ev.plateRaw)})</i>`;
   if (ev.vehicleId && ev.gpsName && plateKey(ev.gpsName) !== ev.plate) line += `  <i>(GPS'da: ${escape(ev.gpsName)})</i>`;
-  if (ev.readBy === 'own') line += "\n🤖 <i>Raqamni o'z modelimiz videodan o'qidi (kamera yozmadi)</i>";
-  else if (ev.readBy === 'own-reread') line += "\n🤖 <i>Kamera o'qiy olmadi, raqamni o'z modelimiz o'qidi</i>";
   return line;
 }
 

@@ -391,7 +391,8 @@ Test period, after the app's misread correction (`plates.correct` against plates
 - **The app** (`src/cameras/ownreader.js`) asks the reader for new passes every 3 s.
   - A pass waits 45 s for the camera's own capture. If none came, it becomes a gate event through the same tracker,
     matching, GPS check and alerts as a camera capture.
-  - `gate_events.read_by` is `own`; the alert says "Raqamni o'z modelimiz videodan o'qidi".
+  - `gate_events.read_by` is `own`. Alerts look the same as for the camera's reads (the line saying our model read it
+    was taken out on 7 Nov at the user's request; the web app still shows who read it).
   - A camera capture with an unreadable plate is re-read (`read_by` `own-reread`).
 - **Watching:** each plate camera's sub stream (640×480) is decoded at 4 frames a second for motion. While
   something moves, the main stream (2560×1440) is read at 4 frames a second.
@@ -405,3 +406,32 @@ Test period, after the app's misread correction (`plates.correct` against plates
   - The one miss was read right in an earlier run.
   - Unit tests: `test/ownreader.test.js`.
 - **Switch it off:** `READER_URL=` in `.env`, then `docker compose up -d app`. The gate then runs on the cameras alone, as before.
+
+### First day live (7 Nov 2026) and the change after it
+
+- **Checked against the cameras' own vehicle counters**, which are printed on the video ("Forward n Reverse n") and keep
+  counting even though the NVR refuses the plate pictures. GPS yard visits are no reference: the yard circle takes in
+  part of the public road, and with the cameras working only about 55% of GPS crossings had a capture.
+  - From 02:00 to 12:30: the exit camera counted 21 vehicles and our reader reported about 19 passes. The entry camera
+    counted 21 and our reader reported about 15.
+  - None of the 30 gate events from our reader had a wrong plate. GPS confirmed 15 of them, the rest were trucks not on GPS.
+- **Why entries were missed:** the main stream needs about 1.5 s to give its first frame after motion starts, and an
+  entering truck crosses the picture in about 2.5 s. For example, the 06:34 entry was read once live and dropped, but
+  its recording has 8 good reads. Keeping the main streams open all the time would fix it, but it costs about 75% of a
+  core per camera (1.5 cores in total) on a shared 4-core server.
+- **What was done instead:** when a pass ends with a plate seen but not reported, the same seconds are read again from
+  the NVR's recording, from 4 s before the motion started.
+  - The NVR serves a recording only after about a minute (40 s back gave 400), so such a pass comes 1.5–2 min late. It
+    still gets its photo: our frame comes with it.
+  - A re-read takes 40–60 s of reading, and happens only after a weak pass.
+  - Plates seen standing still in the last 30 minutes don't ask for one.
+- **On the recordings of the misses:** the 06:34 entry was found from the recording (8 reads, right plate). Two exit-camera
+  windows had nothing readable, and nothing was reported. One was trucks turning inside the yard; the other was a
+  plate the camera never showed clearly.
+- **Also:**
+  - A pass with two trucks close behind each other now reports both. Before, only the plate read most often was reported.
+  - A plate a few characters from a stronger one, read in the same seconds, is taken as a misread of it.
+  - Fleet numbers one character apart (10872HDA, 10873HDA) read at different times stay separate.
+- **Watch:** `/health` of the reader gives per camera `passes_live`, `passes_recording`, `rereads`, `rereads_found`,
+  `rereads_empty`, `rereads_failed`. Log lines: `pass chN … from the recording`, `recording HH:MM:SS: no plate read twice`.
+- **Tests:** `python -m unittest reader/test_server.py` (the reader's pass decisions; needs the reader's Python packages).

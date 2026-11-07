@@ -9,3 +9,4 @@ data/
 
 # end-to-end test output
 test/e2e/.output/
+__pycache__/

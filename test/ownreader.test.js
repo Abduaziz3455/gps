@@ -79,6 +79,18 @@ test('a vehicle our reader saw while the camera recorded nothing becomes a gate 
   assert.deepEqual(fs.readFileSync(path.join(dataDir, 'photos', photos[0].file)), JPEG);
 });
 
+test('a pass read again from the recording comes minutes late and still has its photo', async () => {
+  const { own, reader, events } = setup();
+  await own.poll();
+  const t = Date.now() - 200e3; // past the 3 minutes in which the NVR is asked for pictures
+  reader.add({ channel: 3, time: t, plate: '85450KBA', conf: 0.96, source: 'recording' });
+  await own.poll();
+  await own.release();
+  const [ev] = events();
+  assert.equal(ev.read_by, 'own');
+  assert.equal(JSON.parse(ev.photos).length, 1);
+});
+
 test("the camera's own capture of the same pass wins: ours is dropped", async () => {
   const { own, reader, events, tracker } = setup();
   await own.poll();
