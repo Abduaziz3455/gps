@@ -109,3 +109,15 @@ test('login is throttled after 8 failures from one address', async (t) => {
   const r = await call('/api/auth/login', { method: 'POST', body: { username: 'boss', password: 'owner-pass-1' } });
   assert.equal(r.status, 429);
 });
+
+test('a vehicle removed from GoGPS stays in the list (for its history) but not in the live counts', async (t) => {
+  const { srv, call, login, h } = await server();
+  t.after(() => srv.close());
+  h.run('UPDATE vehicles SET in_gps = 0 WHERE id = 2');
+  h.run('INSERT INTO vehicles (id, name, plate, active, in_gps, camera_only, updated_at) VALUES (3, ?, ?, 1, 0, 1, 0)', '10 834 HDA', '10834HDA');
+  const disp = await login('disp', 'disp-pass-1');
+  const list = (await call('/api/vehicles', { cookie: disp })).data;
+  assert.deepEqual(list.map((v) => [v.id, v.inGps]).sort(), [[1, true], [2, false], [3, false]]);
+  const { status } = (await call('/api/today', { cookie: disp })).data;
+  assert.equal(status.moving + status.idle + status.stopped + status.offline, 1);
+});

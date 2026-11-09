@@ -29,7 +29,9 @@ class Poller {
       this.openVisit.set(r.vehicle_id, { id: r.id, enter_t: r.enter_t });
     }
     // Restore the last known positions so the map isn't empty right after a restart.
-    for (const p of h.kvGet('live_snapshot', [])) this.live.set(p.id, p);
+    // A vehicle removed from GoGPS meanwhile is left out.
+    const inGps = new Set(this.vehicleIds());
+    for (const p of h.kvGet('live_snapshot', [])) if (!inGps.size || inGps.has(p.id)) this.live.set(p.id, p);
   }
 
   vehicleIds() {
@@ -49,6 +51,15 @@ class Poller {
       }
     });
     this.vehiclesLoadedAt = now;
+    // A vehicle no longer in GoGPS leaves the map, the counts and the checks (no "no signal" alert for it).
+    // Its history stays, and it comes back by itself if it is added to GoGPS again.
+    const ids = new Set(list.map((v) => v.id));
+    const gone = [...this.live.keys()].filter((id) => !ids.has(id));
+    for (const id of gone) { this.live.delete(id); this.lastSample.delete(id); }
+    if (gone.length) {
+      this.h.kvSet('live_snapshot', [...this.live.values()]);
+      this.log.info?.(`GPS fleet: no longer in GoGPS: ${gone.join(', ')}`);
+    }
     bus.emit('vehicles');
     this.log.info?.(`GPS fleet: ${list.length} vehicles`);
   }

@@ -359,7 +359,7 @@ function buildApi(ctx) {
     const live = [...(poller?.live.values() || [])];
     const active = new Set(h.all('SELECT id FROM vehicles WHERE active = 1').map((v) => v.id));
     const counts = { moving: 0, idle: 0, stopped: 0, offline: 0 };
-    for (const v of vehiclesLive()) if (!v.cameraOnly) counts[v.status]++;
+    for (const v of vehiclesLive()) if (v.inGps) counts[v.status]++; // not camera-only ones, nor ones removed from GoGPS
     void live; void active;
     return { ...analytics.today(), insideFleet: y.inside.filter((x) => x.fleet).length + y.gpsOnly.length, insideOutside: y.inside.filter((x) => !x.fleet).length, status: counts };
   });
