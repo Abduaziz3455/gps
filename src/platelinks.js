@@ -137,14 +137,53 @@ class PlateLinks {
     }));
   }
 
-  _plate(raw) {
+  /** `forVehicle`: linking to the truck that already has the plate (as its set plate or GPS name) is allowed. */
+  _plate(raw, forVehicle = null) {
     const plate = plateKey(raw);
     if (!plates.isValid(plate)) throw httpError(400, "Raqam noto'g'ri");
     if (this.h.get('SELECT 1 FROM plate_links WHERE plate = ?', plate)) throw httpError(409, 'Bu raqam haqida qaror allaqachon qabul qilingan');
     // A truck that already has it: as its set plate, or as the name it has in GPS.
     const owner = this.h.all('SELECT * FROM vehicles').find((v) => plateKey(v.plate) === plate || plateKey(v.name) === plate);
-    if (owner) throw httpError(409, `Bu raqam ${vehicleLabel(owner)} transportiga tegishli`);
+    if (owner && owner.id !== forVehicle) throw httpError(409, `Bu raqam ${vehicleLabel(owner)} transportiga tegishli`);
     return plate;
+  }
+
+  /**
+   * Past passes of a plate that a truck now has, as its GPS name or set plate, go to that truck. GoGPS gets cars added
+   * and renamed to their real plates (2026-11-09: three added, "85 518 EBA" renamed "10 963 DDA"); new passes match
+   * them at once, this brings the earlier ones along. The owner's decisions (plate_links) are left alone, and so is a
+   * plate two trucks share. Runs after each GoGPS list sync and at start.
+   */
+  async claimFleetPlates() {
+    const owners = new Map(); // plate -> vehicle ids
+    for (const v of this.h.all('SELECT * FROM vehicles WHERE active = 1')) {
+      for (const k of new Set([plateKey(v.plate), plateKey(v.name)])) {
+        if (!plates.isValid(k)) continue;
+        if (!owners.has(k)) owners.set(k, new Set());
+        owners.get(k).add(v.id);
+      }
+    }
+    const decided = new Set(this.h.all('SELECT plate FROM plate_links').map((r) => r.plate));
+    const waiting = this.h.all(`SELECT DISTINCT plate FROM gate_events WHERE vehicle_id IS NULL AND plate_valid = 1
+      AND plate IS NOT NULL AND status IN ('outside', 'history')`).map((r) => r.plate);
+    let rows = [];
+    const claimed = [];
+    this.h.tx(() => {
+      for (const plate of waiting) {
+        const ids = owners.get(plate);
+        if (!ids || ids.size !== 1 || decided.has(plate)) continue;
+        const [vehicleId] = ids;
+        const r = this.h.all("SELECT id, t FROM gate_events WHERE plate = ? AND vehicle_id IS NULL AND plate_valid = 1 AND status IN ('outside', 'history')", plate);
+        this.h.run(`UPDATE gate_events SET vehicle_id = ?, identified_by = 'plate', status = 'history', status_note = ?, resolve_at = NULL
+          WHERE plate = ? AND vehicle_id IS NULL AND plate_valid = 1 AND status IN ('outside', 'history')`, vehicleId, "GPS'dagi nomi bo'yicha keyin biriktirildi", plate);
+        rows = rows.concat(r);
+        claimed.push(`${prettyPlate(plate)} (${r.length})`);
+      }
+    });
+    if (!rows.length) return { moved: 0 };
+    this.log.info?.(`Past passes to the truck with that plate in GPS: ${claimed.join(', ')}`);
+    const days = await this._recount(rows);
+    return { moved: rows.length, days: days.length };
   }
 
   /** Past passes of the plate go to the vehicle. Returns how many, and the days to recount. */
@@ -167,7 +206,7 @@ class PlateLinks {
 
   /** This GPS truck has this plate. */
   async link(raw, vehicleId, user) {
-    const plate = this._plate(raw);
+    const plate = this._plate(raw, vehicleId);
     const v = this.h.get('SELECT * FROM vehicles WHERE id = ?', vehicleId);
     if (!v) throw httpError(404, 'Transport topilmadi');
     let rows;

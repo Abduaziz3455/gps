@@ -61,6 +61,7 @@ class Poller {
       this.log.info?.(`GPS fleet: no longer in GoGPS: ${gone.join(', ')}`);
     }
     bus.emit('vehicles');
+    bus.emit('fleet'); // the GoGPS list was read (names may have changed)
     this.log.info?.(`GPS fleet: ${list.length} vehicles`);
   }
 

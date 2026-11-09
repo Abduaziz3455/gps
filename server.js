@@ -93,6 +93,14 @@ function build() {
   const places = new Places({ h, config, log });
   const trips = new Trips({ h, gps, places, config, log });
   const plateLinks = new PlateLinks({ h, analytics, trips, log });
+  // Past passes of a plate a truck now has in GPS go to it (cars get added to GoGPS, or renamed to their real plates).
+  let claiming = false;
+  const claim = () => {
+    if (claiming) return;
+    claiming = true;
+    plateLinks.claimFleetPlates().catch((e) => log.warn?.(`claiming past passes failed: ${e.message}`)).finally(() => { claiming = false; });
+  };
+  bus.on('fleet', claim);
   const rules = new Rules({ h, config, poller, gate, places, log });
   const push = new Push({ h, config, log });
   // In MOCK mode the internet probe is simulated too (see src/mock/sim.js mockFail).

@@ -415,3 +415,42 @@ test('the decided list says what was decided, last first', async () => {
   assert.equal(by['85W670JA'].kind, 'outside');
   assert.equal(by['85W670JA'].passes, 4);
 });
+
+// --- trucks added to GoGPS, or renamed to their real plates ---------------------------------------------
+
+test('a truck added to GoGPS under the plate gets its past outsider passes, and those days are recounted', async () => {
+  const s = setup();
+  const ts = s.regular('10834HDA', 3);
+  s.links.markOutside('01M393YA', owner);
+  s.regular('01M393YA', 2);
+  s.h.run('INSERT INTO vehicles (id, name, updated_at) VALUES (39895, ?, 0)', '10 834 HDA');
+  s.h.run('INSERT INTO vehicles (id, name, updated_at) VALUES (39900, ?, 0)', '01 M 393 YA');
+  const r = await s.links.claimFleetPlates();
+  assert.equal(r.moved, 6);
+  const evs = s.h.all("SELECT vehicle_id, identified_by, status FROM gate_events WHERE plate = '10834HDA'");
+  assert.ok(evs.every((e) => e.vehicle_id === 39895 && e.identified_by === 'plate' && e.status === 'history'));
+  assert.equal(s.h.get('SELECT trips_out FROM daily_stats WHERE day = ? AND vehicle_id = 39895', T.dayOf(ts[0])).trips_out, 1);
+  assert.ok(!s.links.unknown().some((u) => u.plate === '10834HDA'));
+  assert.equal(s.h.get("SELECT COUNT(*) n FROM gate_events WHERE plate = '01M393YA' AND vehicle_id IS NOT NULL").n, 0, "the owner's \"not ours\" stands");
+  assert.equal((await s.links.claimFleetPlates()).moved, 0, 'once');
+});
+
+test('a truck renamed in GoGPS to its real plate gets that plate\'s passes; a plate two trucks have is left alone', async () => {
+  const s = setup();
+  s.regular('10963DDA', 2);
+  s.regular('10835HDA', 2);
+  s.h.run("UPDATE vehicles SET name = '10 963 DDA' WHERE id = 1");
+  s.h.run('INSERT INTO vehicles (id, name, updated_at) VALUES (39896, ?, 0), (39897, ?, 0)', '10 835 HDA', '10 835 HDA');
+  assert.equal((await s.links.claimFleetPlates()).moved, 4);
+  assert.equal(s.h.get("SELECT COUNT(*) n FROM gate_events WHERE plate = '10963DDA' AND vehicle_id = 1").n, 4);
+  assert.equal(s.h.get("SELECT COUNT(*) n FROM gate_events WHERE plate = '10835HDA' AND vehicle_id IS NOT NULL").n, 0);
+});
+
+test('linking a plate to the truck whose GPS name it is works; to another truck it is still refused', async () => {
+  const s = setup();
+  s.regular('10834HDA', 2);
+  s.h.run('INSERT INTO vehicles (id, name, updated_at) VALUES (39895, ?, 0)', '10 834 HDA');
+  await assert.rejects(s.links.link('10834HDA', 1, owner), (e) => e.status === 409 && /10 834 HDA/.test(e.message));
+  const r = await s.links.link('10834HDA', 39895, owner);
+  assert.equal(r.moved, 4);
+});
