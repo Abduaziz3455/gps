@@ -114,7 +114,6 @@ const config = {
   },
 
   rules: {
-    speedLimit: num(env.SPEED_LIMIT_KMH, 80),
     longStopMin: num(env.LONG_STOP_MINUTES, 90),
     workHours: env.WORK_HOURS || '06:00-22:00',
   },

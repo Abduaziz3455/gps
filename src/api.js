@@ -473,7 +473,7 @@ function buildApi(ctx) {
       telegram: ctx.telegram ? ctx.telegram.summary() : null,
       topViews: gate?.topView ? gate.topViewStats() : null,
       dbBytes: (() => { try { return fs.statSync(require('node:path').join(config.dataDir, 'dispatcher.db')).size; } catch { return null; } })(),
-      config: { yard: config.yard, cameras: config.nvr.cameras, speedLimit: config.rules.speedLimit, offlineMinutes: config.gps.offlineMinutes, longStopMinutes: config.rules.longStopMin, workHours: config.rules.workHours },
+      config: { yard: config.yard, cameras: config.nvr.cameras, offlineMinutes: config.gps.offlineMinutes, longStopMinutes: config.rules.longStopMin, workHours: config.rules.workHours },
       uptimeS: Math.round(process.uptime()),
     };
   });

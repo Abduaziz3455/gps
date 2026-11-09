@@ -1,4 +1,4 @@
-// Ogohlantirishlar: rule hits (fuel drain, speeding, no signal, long stop, system), acknowledge, filter, live.
+// Ogohlantirishlar: rule hits (fuel drain, no signal, long stop, system), acknowledge, filter, live.
 // ?id=<n> highlights one alert (push notifications open it this way).
 import { get, post, state, qs } from '../api.js';
 import { $, $$, html, setHtml, icon, when, toast, toastError, confirmDialog, debounce } from '../ui.js';
@@ -6,7 +6,7 @@ import { replaceQuery } from './reports.js';
 
 export const ALERT_TYPES = {
   fuel_drain: "Yoqilg'i to'kilishi",
-  speeding: 'Tezlik',
+  speeding: 'Tezlik', // no longer raised; old ones stay readable
   no_signal: "Signal yo'q",
   long_stop: "Uzoq to'xtash",
   system: 'Tizim',
@@ -36,7 +36,7 @@ const rowHtml = (a) => {
 
 export default {
   async render(main, { query }) {
-    const types = Object.keys(ALERT_TYPES);
+    const types = Object.keys(ALERT_TYPES).filter((t) => t !== 'speeding');
     let filter = {
       state: query.state === 'all' ? 'all' : 'open',
       type: types.includes(query.type) ? query.type : '',

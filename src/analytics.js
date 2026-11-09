@@ -203,7 +203,6 @@ class Analytics {
     const outside = this.h.get(`SELECT COUNT(*) n, COUNT(DISTINCT plate) plates FROM gate_events WHERE direction = 'in'
       AND vehicle_id IS NULL AND status IN ('outside','history') AND plate_valid = 1 AND t >= ? AND t < ?`, start, end);
     const drains = this.h.get('SELECT COUNT(*) n FROM fuel_events WHERE kind = ? AND t >= ? AND t < ?', 'drain', start, end).n;
-    const speeding = this.h.get("SELECT COUNT(*) n FROM alerts WHERE type = 'speeding' AND t >= ? AND t < ?", start, end).n;
     return {
       km: r1(s.km),
       trips: s.trips,
@@ -221,7 +220,6 @@ class Analytics {
       yardMin: stay.n ? Math.round(stay.a / 60) : null,
       outsideVisits: outside.n,
       outsidePlates: outside.plates,
-      speeding,
       vehiclesTotal,
     };
   }

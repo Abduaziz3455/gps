@@ -40,7 +40,6 @@ function tile(def, cur, prev) {
 function attention(c, vehicles) {
   const items = [];
   if (c.drains) items.push({ sev: 'bad', text: `Yoqilg'i to'kildi: ${c.drains} marta, jami ${num(c.drainL)} L`, href: '#/ogohlantirish?state=all&type=fuel_drain' });
-  if (c.speeding) items.push({ sev: 'warn', text: `Tezlik oshirildi: ${c.speeding} marta`, href: '#/ogohlantirish?state=all&type=speeding' });
   const over = vehicles.filter((v) => v.fuelNorm && v.fuelPer100 > v.fuelNorm * 1.15);
   if (over.length) items.push({ sev: 'warn', text: `Yoqilg'i normadan ko'p: ${over.map((v) => v.label).join(', ')}` });
   const idle = vehicles.filter((v) => !v.trips && v.km < 5);

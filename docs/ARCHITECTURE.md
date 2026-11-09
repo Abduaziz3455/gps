@@ -126,7 +126,7 @@ at once. Each event's state is in `gate_events.top_view`, so a restart carries o
 |---|---|---|
 | `users`, `sessions` | people | role `owner` or `dispatcher`; sessions are hashed random tokens, 30 days |
 | `vehicles` | 20 | synced from GPS hourly; the owner edits **type** (mixer / dump / excavator / other), the **real plate** when the GPS name differs, a display name and the fuel norm |
-| `positions` | ~30k/day | a sample when the vehicle moved > 25 m, changed status, or every 2 min; kept 180 days. Track replay, speeding, distance checks |
+| `positions` | ~30k/day | a sample when the vehicle moved > 25 m, changed status, or every 2 min; kept 180 days. Track replay, distance checks |
 | `yard_visits` | | GPS: vehicle entered / left the yard circle |
 | `cam_sightings`, `cam_passes`, `cam_presence` | | raw NVR records and the tracker's state (as in the notifier) |
 | `gate_events` | ~150/day | one per real pass: plate, vehicle, direction, status (pending / confirmed / unconfirmed / vetoed / outside), time inside, photos |
@@ -161,7 +161,7 @@ Each page keeps its own address.
 | **Ogohlantirishlar** (alerts) | ✓ | ✓ | Rule hits (section 7), acknowledge, filter |
 | **Transport** (vehicle page) | ✓ | ✓ | One vehicle over a date range: track replay with stops, gate events, daily km / fuel / trips, refuels and drains; average L/100 km and utilization over 14 days; the owner marks a stop as a place here |
 | **Joylar** (places) | ✓ | ✓ | Trips to each named place for any range, which vehicles went, how long they stayed. The owner renames, resizes and deletes |
-| **Tahlil** (analytics) | — | ✓ | At a glance: trips, km, fuel and utilization vs the previous period; daily trips or km; what needs attention (fuel drains, speeding, over-norm fuel, idle vehicles, outside vehicles); vehicles ranked by trips. The full table is in Hisobot |
+| **Tahlil** (analytics) | — | ✓ | At a glance: trips, km, fuel and utilization vs the previous period; daily trips or km; what needs attention (fuel drains, over-norm fuel, idle vehicles, outside vehicles); vehicles ranked by trips. The full table is in Hisobot |
 | **Hisobotlar** (reports) | ✓ | ✓ | Daily and monthly tables per vehicle, CSV export |
 | **Sozlamalar** (settings) | own notifications | ✓ | Users (create, reset password, disable, role), vehicles (type, plate), alert thresholds, yard, system health |
 
@@ -195,7 +195,7 @@ Per day, per vehicle and for the fleet; ranges: today, yesterday, 7 / 30 days, t
 | Turnaround (exit → next entry) | cameras | delivery cycle time |
 | Time inside the yard (entry → exit) | cameras | loading queue |
 | Outside vehicles | cameras | suppliers and visitors: count and time inside |
-| Max speed, speeding | position samples | safety |
+| Max speed | position samples | safety |
 | Data health | positions, NVR, GPS | vehicles without signal, camera reads not matched to GPS |
 
 The Tahlil page keeps to the headline: trips, km, fuel and utilization against the previous period, one daily

@@ -275,25 +275,6 @@ test.describe('losing the connection', () => {
 });
 
 test.describe('alert rules, live', () => {
-  test('speeding is raised from real polls, once per incident', async () => {
-    test.setTimeout(150_000);
-    const s = new TestServer({ name: `speed${Date.now()}`, env: { SPEED_LIMIT_KMH: '10', GPS_POLL_SECONDS: '2', CAMERA_BACKFILL_DAYS: '0' } }).seedFrom(process.env.E2E_TEMPLATE_DIR);
-    s.run("DELETE FROM alerts WHERE type = 'speeding'");
-    await s.start();
-    try {
-      const a = await login(s);
-      const moving = (await a.get('/api/vehicles')).data.filter((v) => v.status === 'moving').length;
-      test.skip(!moving && !(await new Promise((r) => setTimeout(async () => r((await a.get('/api/vehicles')).data.some((v) => v.status === 'moving')), 8000))), 'no simulated truck is moving at this hour');
-      await expect.poll(async () => (await a.get('/api/alerts?type=speeding')).data.length, { timeout: 60_000 }).toBeGreaterThan(0);
-      const rows = (await a.get('/api/alerts?type=speeding')).data;
-      expect(rows[0].title).toContain('Tezlik oshirildi');
-      expect(rows[0].body).toContain('chegara 10');
-      expect(rows[0].vehicleLabel).toBeTruthy();
-      const ids = rows.map((r) => r.vehicleId);
-      expect(new Set(ids).size, 'one per vehicle in the half-hour window').toBe(ids.length);
-    } finally { await s.destroy(); }
-  });
-
   test('no signal: raised for a vehicle that worked this week, not for one long dead', async () => {
     test.setTimeout(120_000);
     const s = new TestServer({ name: `sig${Date.now()}`, env: { GPS_POLL_SECONDS: '2', CAMERA_BACKFILL_DAYS: '0' } }).seedFrom(process.env.E2E_TEMPLATE_DIR);

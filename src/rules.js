@@ -2,9 +2,9 @@
 /**
  * Alert rules. Each incident gets a stable `key`, so it is raised once however often the rule fires.
  *   fuel_drain  any drain GoGPS reports                                   critical
- *   speeding    over the limit in 2 consecutive polls (once per 30 min)    warning
  *   no_signal   no GPS record for OFFLINE_MINUTES, vehicle active in 7 d   warning (once per outage)
  *   long_stop   parked outside the yard longer than LONG_STOP_MINUTES      info    (work hours only)
+ * There is no speeding alert any more (the owner asked for none, 2026-11-09); old ones stay in the history.
  * System health (NVR, GPS, internet, cameras, our server) is src/health.js; it raises its alerts through raise().
  */
 const bus = require('./bus');
@@ -19,7 +19,6 @@ class Rules {
     this.gate = gate;
     this.places = places;
     this.log = log;
-    this.over = new Map(); // vehicleId -> consecutive polls over the limit
     this.movingAt = new Map(); // vehicleId -> last record time while moving
     this.timer = null;
   }
@@ -50,20 +49,7 @@ class Rules {
   }
 
   onPositions(list) {
-    const limit = this.cfg.rules.speedLimit;
-    for (const p of list) {
-      if (p.status === 'moving') this.movingAt.set(p.id, p.recordTime);
-      const n = p.speed > limit && p.status !== 'offline' ? (this.over.get(p.id) || 0) + 1 : 0;
-      this.over.set(p.id, n);
-      if (n === 2) {
-        const bucket = Math.floor(p.recordTime / 1800e3);
-        this.raise({
-          key: `speeding:${p.id}:${bucket}`, type: 'speeding', severity: 'warning', vehicleId: p.id, t: p.recordTime,
-          title: `Tezlik oshirildi: ${this.label(p.id)}`, body: `${Math.round(p.speed)} km/soat (chegara ${limit}) · ${this.where(p)}`,
-          data: { speed: p.speed, lat: p.lat, lng: p.lng },
-        });
-      }
-    }
+    for (const p of list) if (p.status === 'moving') this.movingAt.set(p.id, p.recordTime);
   }
 
   onFuel(f) {

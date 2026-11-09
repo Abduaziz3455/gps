@@ -688,7 +688,6 @@ async function renderSystem(panel) {
         <section class="card">
           <div class="card-head"><h3>Chegaralar</h3></div>
           <div class="card-body"><dl class="kv">
-            <dt>Tezlik chegarasi</dt><dd>${num(c.speedLimit)} km/soat</dd>
             <dt>Signal yo'q</dt><dd>${num(c.offlineMinutes)} daqiqadan keyin</dd>
             <dt>Uzoq to'xtash</dt><dd>${num(c.longStopMinutes)} daqiqadan ortiq</dd>
             <dt>Ish vaqti</dt><dd>${c.workHours}</dd>

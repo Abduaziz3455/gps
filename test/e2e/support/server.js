@@ -98,7 +98,6 @@ class TestServer {
       ...baseEnv(),
       NODE_ENV: 'development', HOST: '127.0.0.1', PORT: String(this.port), DATA_DIR: this.dataDir,
       PUBLIC_ORIGIN: `http://127.0.0.1:${this.port}`,
-      SPEED_LIMIT_KMH: '500', // live speeding alerts would pop toasts over the UI under test; tested on their own
       INTERNET_PROBES: `127.0.0.1:${this.port}`, // non-mock servers: never probe the outside world
       TILE_URL: `http://127.0.0.1:${this.port}/no-tiles/{z}/{x}/{y}`, // browsers get a stub; the real tile servers stay out of it
       ...(this.mock ? { MOCK: '1' } : {}),

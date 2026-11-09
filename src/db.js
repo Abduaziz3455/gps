@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS fuel_events (
 CREATE TABLE IF NOT EXISTS alerts (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   key        TEXT NOT NULL UNIQUE,         -- dedupe: one alert per incident
-  type       TEXT NOT NULL,                -- fuel_drain | speeding | no_signal | long_stop | system
+  type       TEXT NOT NULL,                -- fuel_drain | no_signal | long_stop | system (speeding: old rows only)
   severity   TEXT NOT NULL,                -- info | warning | critical
   vehicle_id INTEGER,
   t          INTEGER NOT NULL,
