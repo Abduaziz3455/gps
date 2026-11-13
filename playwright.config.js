@@ -17,7 +17,7 @@ const simulated = [
   // Smoke on the other engines: iPhones (WebKit) are a primary target of the app.
   { name: 'firefox', testDir: 'test/e2e/ui', testMatch: /smoke\.spec/, use: { ...devices['Desktop Firefox'] } },
   { name: 'webkit', testDir: 'test/e2e/ui', testMatch: /smoke\.spec/, use: { ...devices['Desktop Safari'] } },
-  { name: 'iphone', testDir: 'test/e2e/ui', testMatch: /smoke\.spec/, use: { ...devices['iPhone 14'] } },
+  { name: 'iphone', testDir: 'test/e2e/ui', testMatch: /(smoke|tg)\.spec/, use: { ...devices['iPhone 14'] } }, // tg: Telegram's iPhone app is WebKit too
 ];
 
 module.exports = defineConfig({

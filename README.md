@@ -38,14 +38,14 @@ src/gps/             GoGPS client (1 req/s queue), normalisation, live poller (p
 src/cameras/         NVR client (digest auth), plate rules, in/out tracker, top view from the recording (ffmpeg)
 src/gate.js          camera pipeline: captures -> gate events -> GPS confirm/identify -> photos -> notify
 src/notify/          durable delivery queue, one row per recipient, for any channel
-src/telegram/        the bot: client, commands, recipients, alert format, scheduled reports
+src/telegram/        the bot: client, commands, recipients, alert format, scheduled reports, mini app login
 src/reports.js       daily / monthly report, yard and camera-vs-GPS check as text
 src/analytics.js     daily per-vehicle rollups + analytics queries
 src/rules.js         alert rules        src/push.js   Web Push        src/auth.js   users, roles, sessions
 src/api.js           JSON API + live stream (SSE)
 src/tiles.js         map tiles: this server fetches them from OpenStreetMap for the browser, a few at a time
 src/dnscache.js      remembered DNS answers, so a burst to one host can't hold up the others
-public/              the app (index.html, css/, js/pages/*, sw.js)
+public/              the app (index.html, css/, js/pages/*, sw.js); public/tg/ + js/tg/: the Telegram mini app
 src/mock/sim.js      simulated GPS + NVR for development (MOCK=1)
 ```
 
@@ -83,3 +83,15 @@ Commands: `/bugun` `/kecha` `/oy` `/hovli` `/tekshir` `/holat` `/oluvchilar` `/u
 
 Only one program may use a bot token at a time; the app reports it in system health if another one does. ffmpeg must be installed
 for the top view (the Docker image has it). Without it, alerts go with the other photos.
+
+### Mini app
+
+A small version of the app inside the bot, for the owner and dispatchers on their phones: **Bugun** (the fleet now,
+the yard, today's numbers, open alerts, the latest passes), **Xarita** (live map with search and status filter, or a
+list), **Darvoza** (passes with photos; who is in the yard and for how long), **Hisobot** (today, yesterday, this
+month), alerts from the bell, and a page per truck and per pass. Only acknowledging alerts changes anything; the rest
+is on the site.
+
+People open it with the bot's **Ochish** button (or `/app`) and log in once with their site login and password; after
+that it opens without a password. The owner sees and removes these links in Settings → Users. Every gate alert ends
+with **Ilovada ochish**, which opens that pass. Setup: START_PROJECT.md; design: docs/telegram-mini-app-plan.md.

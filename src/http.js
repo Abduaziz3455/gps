@@ -23,6 +23,9 @@ const CSP = [
   "form-action 'self'",
 ].join('; ');
 
+// The mini app's page (public/tg/) also runs Telegram's own script, which talks to the Telegram app around the page.
+const CSP_MINI_APP = CSP.replace("script-src 'self'", "script-src 'self' https://telegram.org");
+
 function securityHeaders(res, production) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -120,4 +123,4 @@ function clientIp(req) {
   return remote;
 }
 
-module.exports = { Router, parseCookies, readJson, json, serveFile, securityHeaders, clientIp, MIME };
+module.exports = { Router, parseCookies, readJson, json, serveFile, securityHeaders, clientIp, MIME, CSP_MINI_APP };

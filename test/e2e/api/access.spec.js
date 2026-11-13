@@ -54,10 +54,14 @@ const ROUTES = [
   ['POST', '/api/users', '/api/users', 'owner'],
   ['PATCH', '/api/users/:id', '/api/users/1', 'owner'],
   ['DELETE', '/api/users/:id', '/api/users/1', 'owner'],
+  ['DELETE', '/api/users/:id/telegram', '/api/users/1/telegram', 'owner'],
   ['POST', '/api/auth/login', '/api/auth/login', 'public'],
+  ['POST', '/api/auth/telegram', '/api/auth/telegram', 'public'],            // Telegram's signed data is the credential
+  ['POST', '/api/auth/telegram/link', '/api/auth/telegram/link', 'public'],  // that, plus the login and password
   ['POST', '/api/auth/logout', '/api/auth/logout', 'public'],
   ['GET', '/api/me', '/api/me', 'user'],
   ['POST', '/api/me/password', '/api/me/password', 'user'],
+  ['DELETE', '/api/me/telegram', '/api/me/telegram', 'user'],
   ['POST', '/api/push/subscribe', '/api/push/subscribe', 'user'],
   ['POST', '/api/push/prefs', '/api/push/prefs', 'user'],
   ['POST', '/api/push/status', '/api/push/status', 'user'],
@@ -111,6 +115,13 @@ for (const [method, , url, access] of ROUTES) {
     }
   }
 }
+
+test('the mini app login: without a bot token nothing gets in, whatever is sent', async ({ anon }) => {
+  for (const body of [{}, { initData: 'user=%7B%22id%22%3A1%7D&auth_date=1&hash=' + '0'.repeat(64) }, { initData: 'x', username: 'owner', password: 'owner12345' }]) {
+    expect((await anon.post('/api/auth/telegram', body)).status).toBe(401);
+    expect((await anon.post('/api/auth/telegram/link', body)).status).toBe(401);
+  }
+});
 
 test('unknown API routes answer JSON 404, for everyone', async ({ anon, owner }) => {
   for (const c of [anon, owner]) {

@@ -329,12 +329,13 @@ async function renderUsers(panel) {
       <div class="card-head"><h3>Foydalanuvchilar</h3><span class="small muted">${users.length} ta</span><span class="spacer"></span>
         <button class="btn btn-primary btn-sm" type="button" data-act="new">${icon('user')}<span>Yangi foydalanuvchi</span></button></div>
       <div class="table-wrap"><table class="table">
-        <thead><tr><th scope="col">Ism</th><th scope="col">Login</th><th scope="col">Rol</th><th scope="col">Holat</th><th scope="col">Oxirgi kirish</th><th scope="col" aria-label="Amallar"></th></tr></thead>
+        <thead><tr><th scope="col">Ism</th><th scope="col">Login</th><th scope="col">Rol</th><th scope="col">Holat</th><th scope="col">Telegram</th><th scope="col">Oxirgi kirish</th><th scope="col" aria-label="Amallar"></th></tr></thead>
         <tbody>${users.map((u) => html`<tr data-id="${u.id}">
           <td><b>${u.name}</b>${u.id === me ? html` <span class="small muted">(siz)</span>` : ''}</td>
           <td class="mono">${u.username}</td>
           <td><span class="pill ${u.role === 'owner' ? 'info' : ''}">${ROLE[u.role] || u.role}</span></td>
           <td>${u.disabled ? html`<span class="pill bad">O'chirilgan</span>` : html`<span class="pill good">Faol</span>`}</td>
+          <td class="nowrap">${u.telegram ? html`<span class="pill info" title="Telegram ilovasi parolsiz ochiladi">${u.telegram.name || 'ulangan'}</span> <button class="btn btn-ghost btn-sm" type="button" data-act="unlink">Uzish</button>` : html`<span class="muted small">—</span>`}</td>
           <td class="nowrap" title="${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('ru-RU', { timeZone: 'Asia/Tashkent' }) : ''}">${u.lastLoginAt ? when(u.lastLoginAt) : html`<span class="muted">hech qachon</span>`}</td>
           <td class="nowrap right">
             <button class="btn btn-ghost btn-sm" type="button" data-act="edit">Tahrirlash</button>
@@ -344,7 +345,7 @@ async function renderUsers(panel) {
           </td></tr>`)}</tbody>
       </table></div>
     </section>
-    <p class="small muted" style="margin:10px 2px 0">Rahbar hamma narsani ko'radi (tahlil, sozlamalar). Dispetcher — xarita, darvoza, ogohlantirishlar, transport va hisobotlar. "O'chirish" foydalanuvchini bloklaydi (tarix saqlanadi); "O'chirib tashlash" uni butunlay o'chiradi.</p>`);
+    <p class="small muted" style="margin:10px 2px 0">Rahbar hamma narsani ko'radi (tahlil, sozlamalar). Dispetcher — xarita, darvoza, ogohlantirishlar, transport va hisobotlar. "O'chirish" foydalanuvchini bloklaydi (tarix saqlanadi); "O'chirib tashlash" uni butunlay o'chiradi. Telegram: foydalanuvchi botning ilovasiga bir marta login va parol bilan kirgan, endi u parolsiz ochiladi.</p>`);
   };
   const refresh = async () => { users = await get('/api/users'); draw(); };
   const roleSelect = (v) => html`<label class="field"><span>Rol</span><select name="role">
@@ -392,6 +393,12 @@ async function renderUsers(panel) {
     toggle: async (u) => {
       if (!u.disabled && !await confirmDialog("Foydalanuvchini o'chirish", `${u.name} (${u.username}) tizimga kira olmaydi va barcha seanslari yopiladi.`, "O'chirish", true)) return;
       await patch(`/api/users/${u.id}`, { disabled: !u.disabled });
+      await refresh();
+    },
+    unlink: async (u) => {
+      if (!await confirmDialog('Telegramni uzish', `${u.name} (${u.username}) Telegram ilovasini keyingi safar faqat login va parol bilan ocha oladi. Saytga kirishi o'zgarmaydi.`, 'Uzish', true)) return;
+      await del(`/api/users/${u.id}/telegram`);
+      toast({ title: 'Telegram uzildi', kind: 'good', timeout: 3000 });
       await refresh();
     },
     delete: async (u) => {

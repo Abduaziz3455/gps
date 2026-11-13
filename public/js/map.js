@@ -43,7 +43,7 @@ const PLACE_MIN_RADIUS_PX = 12; // like the yard: a small mark keeps a place fin
  * Named places, drawn like the yard in a passive colour, in their own layer under every truck. A name that would land on
  * another name or on the yard's steps aside until zoomed in. The owner taps a name to change the place.
  */
-function drawPlaces(map, host) {
+function drawPlaces(map, host, editable = true) {
   map.createPane('places');
   const group = L.layerGroup().addTo(map);
   let items = [];
@@ -74,7 +74,7 @@ function drawPlaces(map, host) {
   };
   const redraw = () => {
     group.clearLayers();
-    const owner = state.isOwner;
+    const owner = state.isOwner && editable;
     items = state.places.map((p) => {
       L.circle([p.lat, p.lng], { radius: p.radiusM, className: 'place-area named', interactive: false }).addTo(group);
       const marker = L.marker([p.lat, p.lng], { pane: 'places', interactive: owner, keyboard: false, icon: L.divIcon({ className: '', iconSize: [0, 0],
@@ -92,8 +92,8 @@ function drawPlaces(map, host) {
 /** Working trucks are drawn over parked ones; the selected one over everything. */
 const markerZ = (v, selected) => (selected ? 1000 : { moving: 500, idle: 400, stopped: 100 }[v.status] || 0);
 
-/** Map with theme-following tiles and the yard circle. Returns {map, destroy}. */
-export function createMap(node, { center, zoom = 12 } = {}) {
+/** Map with theme-following tiles and the yard circle. Returns {map, destroy}. editPlaces: false shows places read-only. */
+export function createMap(node, { center, zoom = 12, editPlaces = true } = {}) {
   const yard = state.me?.yard;
   const map = L.map(node, { zoomControl: true, attributionControl: true, preferCanvas: false })
     .setView(center || (yard ? [yard.lat, yard.lng] : [41.31, 69.28]), zoom);
@@ -108,7 +108,7 @@ export function createMap(node, { center, zoom = 12 } = {}) {
   const setTiles = () => node.classList.toggle('map-dark', isDark());
   setTiles();
   if (yard) drawYard(map, yard);
-  const offPlaces = drawPlaces(map, node.parentElement);
+  const offPlaces = drawPlaces(map, node.parentElement, editPlaces);
   const setZoom = () => node.classList.toggle('map-near', map.getZoom() >= NEAR_ZOOM);
   map.on('zoomend', setZoom);
   setZoom();

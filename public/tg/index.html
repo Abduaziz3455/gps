@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>TBB Dispatcher</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/css/app.css?v=2.0.0" />
+  <link rel="stylesheet" href="/css/tg.css?v=2.0.0" />
+  <!-- Telegram's own script: who opened the app, the back button, colours. Telegram asks for it to be loaded from here. -->
+  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+</head>
+<body class="tg">
+  <div id="boot" class="boot"><div class="spinner" aria-hidden="true"></div><span>Yuklanmoqda…</span></div>
+
+  <section id="message" class="tg-screen" hidden>
+    <div class="tg-screen-card">
+      <img class="brand-mark" src="/icons/icon.svg" alt="" width="48" height="48" />
+      <h1 id="messageTitle"></h1>
+      <p id="messageText" class="muted"></p>
+      <div id="messageActions" class="tg-actions"></div>
+    </div>
+  </section>
+
+  <section id="link" class="tg-screen" hidden>
+    <form id="linkForm" class="tg-screen-card" autocomplete="on">
+      <img class="brand-mark" src="/icons/icon.svg" alt="" width="48" height="48" />
+      <h1>TBB Dispatcher</h1>
+      <p class="muted">Telegram hisobingizni saytdagi hisobingizga bir marta ulang. Keyin ilova parolsiz ochiladi.</p>
+      <p id="linkWho" class="tg-who"></p>
+      <label class="field"><span>Login</span><input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required /></label>
+      <label class="field"><span>Parol</span><input name="password" type="password" autocomplete="current-password" required /></label>
+      <p id="linkError" class="form-error" role="alert" hidden></p>
+      <button class="btn btn-primary btn-block tg-big" type="submit">Ulash va kirish</button>
+      <p class="muted small">Hisobingiz yo'qmi? Rahbaringizga murojaat qiling.</p>
+    </form>
+  </section>
+
+  <div id="app" class="tg-app" hidden>
+    <header class="tg-top">
+      <h1 id="pageTitle" class="tg-title"></h1>
+      <span id="live" class="tg-live" title="Jonli aloqa"></span>
+      <a id="bell" class="icon-btn bell" href="#/ogohlantirish" aria-label="Ogohlantirishlar"><span id="bellCount" class="badge" hidden>0</span></a>
+      <button id="userBtn" class="tg-avatar" type="button" aria-label="Hisob"></button>
+    </header>
+    <div id="sysBanner" class="sys-banner" role="alert" hidden></div>
+    <main id="main" class="tg-main"></main>
+    <nav id="tabbar" class="tg-tabs" aria-label="Bo'limlar"></nav>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="modalRoot"></div>
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="/js/tg/main.js?v=2.0.0"></script>
+</body>
+</html>

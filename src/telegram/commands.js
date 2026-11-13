@@ -89,9 +89,17 @@ function manage({ recipients, tg }) {
   };
 }
 
+/** /app: a button that opens the mini app. Telegram allows the in-chat kind only in private chats; groups get a link. */
+function appAnswer(miniApp, isPrivate) {
+  const button = isPrivate ? { text: '📱 Ochish', web_app: { url: miniApp.url } } : { text: '📱 Ochish', url: miniApp.link('') };
+  if (!button.url && !button.web_app) return "Ilova hali tayyor emas, birozdan keyin qayta urinib ko'ring.";
+  return { text: "📱 <b>TBB Dispatcher</b>: xarita, darvoza, ogohlantirishlar va hisobot. Birinchi marta saytdagi login va parol bilan kirasiz.", keyboard: [[button]] };
+}
+
 function registerCommands(bot, ctx) {
-  const { reports, recipients } = ctx;
+  const { reports, recipients, miniApp } = ctx;
   const m = manage(ctx);
+  const help = miniApp ? HELP.replace('ℹ️ /holat — tizim holati', 'ℹ️ /holat — tizim holati\n📱 /app — ilovani ochish') : HELP;
   const today = () => T.today();
   bot
     .command({ name: 'bugun', access: 'group', slow: true, aliases: ['today'], description: "📊 Bugungi hisobot: km, yoqilg'i, reyslar", run: () => reports.daily(today()) })
@@ -104,12 +112,13 @@ function registerCommands(bot, ctx) {
     .command({ name: 'ulash', run: m.ulash })
     .command({ name: 'uzish', run: m.uzish })
     .command({ name: 'holat', aliases: ['status'], description: 'ℹ️ Tizim holati', run: () => statusText(ctx) })
-    .command({ name: 'yordam', aliases: ['help'], description: '❓ Yordam', run: () => HELP })
+    .command({ name: 'yordam', aliases: ['help'], description: '❓ Yordam', run: () => help })
     .command({ name: 'id', access: 'public', description: '🆔 Telegram ID raqamingiz', run: ({ user, chat, isAdmin, isPrivate }) => (isAdmin
       ? `🆔 Sizning ID: <code>${user}</code>${isPrivate ? '' : `\n👥 Guruh ID: <code>${chat.id}</code>`}`
       : `🆔 Sizning Telegram ID raqamingiz: <code>${user}</code>\n\nMashina kirib-chiqishi haqida xabar olish uchun shu raqamni administratorga yuboring.`) })
-    .command({ name: 'start', access: 'public', hidden: true, run: ({ user, isAdmin }) => (isAdmin ? HELP
+    .command({ name: 'start', access: 'public', hidden: true, run: ({ user, isAdmin }) => (isAdmin ? help
       : `🆔 Sizning Telegram ID raqamingiz: <code>${user}</code>\n\nMashina kirib-chiqishi haqida xabar olish uchun shu raqamni administratorga yuboring.`) });
+  if (miniApp) bot.command({ name: 'app', access: 'any', description: '📱 Ilovani ochish', run: ({ isPrivate }) => appAnswer(miniApp, isPrivate) });
 }
 
 module.exports = { registerCommands, statusText, recipientsText, HELP };

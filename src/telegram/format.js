@@ -54,9 +54,10 @@ function gpsLines(ev, g) {
  * The caption of a gate alert.
  * @param {object} ev  API shape of the gate event (src/gate.js view)
  * @param {object|null} g  GPS details (src/gatedetails.js), null without GPS
- * @param {{delayMs?: number|null}} [o]  delayMs: shown when the alert goes out late
+ * @param {{delayMs?: number|null, appLink?: string|null}} [o]  delayMs: shown when the alert goes out late; appLink: opens
+ *   this pass in the mini app
  */
-function gateCaption(ev, g, { delayMs = null } = {}) {
+function gateCaption(ev, g, { delayMs = null, appLink = null } = {}) {
   const lines = [ev.direction === 'in' ? '🟢 <b>KIRDI</b>' : '🔴 <b>CHIQDI</b>', plateLine(ev)];
   if (!ev.vehicleId) lines.push(ev.plate && ev.plateValid ? "🚫 <b>GPS ro'yxatida yo'q</b>" : "🚫 <b>GPS bo'yicha aniqlanmadi</b>");
   lines.push(`🕒 ${dmy(ev.t)}`);
@@ -66,13 +67,17 @@ function gateCaption(ev, g, { delayMs = null } = {}) {
   if (ev.gap && !gpsKnows) lines.push(ev.direction === 'in' ? 'ℹ️ <i>Oldingi chiqishi qayd etilmagan</i>' : 'ℹ️ <i>Kirishi qayd etilmagan</i>');
   if (g) lines.push(...gpsLines(ev, g));
   if (delayMs != null) lines.push(`⏳ <i>Kechikkan xabar: ${duration(delayMs / 1000)} oldin</i>`);
+  if (appLink) lines.push(appLine(appLink));
   return lines.join('\n');
 }
 
+/** The last line of an alert: opens what it is about in the mini app. */
+const appLine = (href) => `📱 <a href="${escape(href).replace(/"/g, '&quot;')}">Ilovada ochish</a>`;
+
 /** A system alert (src/health.js) as a message. */
-function systemText(a) {
+function systemText(a, { appLink = null } = {}) {
   const icon = a.severity === 'info' ? '' : a.severity === 'critical' ? '🚨 ' : '⚠️ ';
-  return `${icon}<b>${escape(a.title)}</b>${a.body ? `\n${escape(a.body)}` : ''}`;
+  return `${icon}<b>${escape(a.title)}</b>${a.body ? `\n${escape(a.body)}` : ''}${appLink ? `\n${appLine(appLink)}` : ''}`;
 }
 
 module.exports = { escape, duration, gateCaption, systemText, hms, dmy, space };

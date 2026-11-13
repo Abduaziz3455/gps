@@ -14,6 +14,7 @@ const { view: gateView } = require('./gate');
 const { Places } = require('./places');
 const { Trips } = require('./trips');
 const { PlateLinks } = require('./platelinks');
+const { verify: verifyInitData } = require('./telegram/webapp');
 
 const VEHICLE_TYPES = ['auto', 'mixer', 'dump', 'excavator', 'car', 'other'];
 
@@ -406,6 +407,7 @@ function buildApi(ctx) {
   r.post('/api/users', (req) => { owner(req); return auth.createUser(req.body); });
   r.patch('/api/users/:id', (req, res, p) => { owner(req); return auth.updateUser(intParam(p.id, 'id'), req.body, req.user); });
   r.delete('/api/users/:id', (req, res, p) => { owner(req); auth.deleteUser(intParam(p.id, 'id'), req.user); return { ok: true }; });
+  r.delete('/api/users/:id/telegram', (req, res, p) => { owner(req); return auth.telegramUnlink(intParam(p.id, 'id')); });
 
   // --- session ---------------------------------------------------------------------------------
   const cookie = (res, value, maxAgeS) => {
@@ -422,6 +424,31 @@ function buildApi(ctx) {
     cookie(res, '', 0);
     return { ok: true };
   });
+
+  // --- Telegram mini app (docs/telegram-mini-app-plan.md): Telegram's signed initData instead of the password ----
+  const tgCookie = (res, s) => cookie(res, s.token, Math.floor((s.expires - Date.now()) / 1000));
+  const tgUser = (req) => verifyInitData(req.body.initData, config.telegram.token);
+  r.post('/api/auth/telegram', (req, res) => {
+    const tg = tgUser(req);
+    auth.logout(req.cookies[COOKIE]); // this phone may still hold another Telegram account's session
+    const s = auth.telegramLogin(tg, { ip: clientIp(req), ua: req.headers['user-agent'] });
+    if (!s) { cookie(res, '', 0); return { linked: false, telegram: { name: tg.name }, startParam: tg.startParam }; }
+    tgCookie(res, s);
+    return { linked: true, user: s.user, startParam: tg.startParam };
+  });
+  r.post('/api/auth/telegram/link', (req, res) => {
+    const tg = tgUser(req);
+    const s = auth.telegramLink(tg, req.body.username, req.body.password, { ip: clientIp(req), ua: req.headers['user-agent'] });
+    tgCookie(res, s);
+    return { linked: true, user: s.user, startParam: tg.startParam };
+  });
+  r.delete('/api/me/telegram', (req, res) => {
+    user(req);
+    const u = auth.telegramUnlink(req.user.id);
+    if (!auth.session(req.cookies[COOKIE])) cookie(res, '', 0); // it was the mini app's own session
+    return u;
+  });
+
   r.get('/api/me', (req) => {
     user(req);
     return {

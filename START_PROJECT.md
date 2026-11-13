@@ -110,6 +110,20 @@ cd /opt/tbb_car_notifier && docker compose start
 
 The bot then catches up by itself (up to 6 h).
 
+## Telegram mini app
+
+The app inside the bot (README.md, docs/telegram-mini-app-plan.md). The page and its login work as soon as the code is
+deployed; these steps make the bot offer it.
+
+1. In Telegram, @BotFather → the bot → Bot Settings → Configure Mini App → Enable, with the address
+   `https://tbb-gps.uz/tg/`. This also makes the `t.me/<bot>?startapp` links in alerts work.
+2. In `.env`: `TELEGRAM_MINI_APP=1` (and `PUBLIC_ORIGIN=https://tbb-gps.uz`, already there), then `docker compose up -d`.
+3. Open the bot in a private chat: the button next to the message box says **Ochish**. Log in once with the site login.
+   Each dispatcher does the same on their phone.
+
+To stop offering it: remove `TELEGRAM_MINI_APP`, `docker compose up -d`; the button goes back to Telegram's own. Settings →
+Users shows who has linked Telegram, with **Uzish** to remove it.
+
 ## Everyday
 
 | | |

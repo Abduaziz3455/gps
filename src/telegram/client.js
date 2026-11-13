@@ -150,9 +150,13 @@ class TelegramClient {
   getMe() { return this.call('getMe'); }
   getChat(chatId) { return this.call('getChat', { chat_id: chatId }); }
 
-  sendText(text, chatId) {
-    return this.call('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true });
+  /** extra: more sendMessage fields, e.g. reply_markup (objects are sent as JSON). */
+  sendText(text, chatId, extra = {}) {
+    return this.call('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra });
   }
+
+  /** The button next to the message box in private chats: {type: 'web_app', text, web_app: {url}} or {type: 'default'}. */
+  setMenuButton(button) { return this.call('setChatMenuButton', { menu_button: button }); }
 
   /** Long poll, kept short: a poll stuck on a bad connection is replaced after 35 s, not left waiting. */
   getUpdates(offset, timeoutS = 25) {

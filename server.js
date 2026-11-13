@@ -26,7 +26,7 @@ const { Push } = require('./src/push');
 const { Health, gpsFresh } = require('./src/health');
 const { Outbox } = require('./src/notify/outbox');
 const { buildApi, apiHandler } = require('./src/api');
-const { serveFile, securityHeaders, json } = require('./src/http');
+const { serveFile, securityHeaders, json, CSP_MINI_APP } = require('./src/http');
 
 const log = {
   info: (m) => process.stdout.write(`${new Date().toISOString()} INFO ${m}\n`),
@@ -139,6 +139,12 @@ async function start() {
       if (serveFile(req, res, leafletDir, url.pathname.slice('/vendor/leaflet/'.length), { cache: 'public, max-age=604800' })) return;
       res.statusCode = 404;
       return res.end('Not found');
+    }
+    // The Telegram mini app (docs/telegram-mini-app-plan.md): its own page, with Telegram's script allowed.
+    if (url.pathname === '/tg') { res.statusCode = 301; res.setHeader('Location', `/tg/${url.search}`); return res.end(); }
+    if (url.pathname === '/tg/' || url.pathname === '/tg/index.html') {
+      res.setHeader('Content-Security-Policy', CSP_MINI_APP);
+      return serveFile(req, res, publicDir, 'tg/index.html', { cache: 'no-cache' });
     }
     if (url.pathname !== '/' && url.pathname !== '/index.html') {
       let rel;

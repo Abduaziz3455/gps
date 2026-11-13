@@ -131,8 +131,11 @@ class Auth {
   }
 
   user(id) {
-    const u = this.h.get('SELECT id, username, name, role, disabled, created_at, last_login_at FROM users WHERE id = ?', id);
-    return u ? { id: u.id, username: u.username, name: u.name, role: u.role, disabled: !!u.disabled, createdAt: u.created_at, lastLoginAt: u.last_login_at } : null;
+    const u = this.h.get('SELECT id, username, name, role, disabled, created_at, last_login_at, telegram_id, telegram_name FROM users WHERE id = ?', id);
+    return u ? {
+      id: u.id, username: u.username, name: u.name, role: u.role, disabled: !!u.disabled, createdAt: u.created_at, lastLoginAt: u.last_login_at,
+      telegram: u.telegram_id ? { name: u.telegram_name || '' } : null, // the id itself stays on the server
+    } : null;
   }
 
   users() {
@@ -150,13 +153,65 @@ class Auth {
       throw httpError(401, "Login yoki parol noto'g'ri");
     }
     this.attempts.delete(ip);
+    return this.startSession(u.id, { ip, ua, now });
+  }
+
+  /** A new session. Telegram's last one day: the mini app gets a new one each time it opens. */
+  startSession(userId, { ip, ua, via = null, now = Date.now() }) {
     const token = crypto.randomBytes(32).toString('base64url');
-    const expires = now + this.cfg.sessionDays * 86400e3;
-    this.h.run('INSERT INTO sessions (token_hash, user_id, created_at, expires_at, ua, ip) VALUES (?, ?, ?, ?, ?, ?)',
-      sha256(token), u.id, now, expires, String(ua || '').slice(0, 200), ip);
-    this.h.run('UPDATE users SET last_login_at = ? WHERE id = ?', now, u.id);
+    const expires = now + (via === 'telegram' ? 86400e3 : this.cfg.sessionDays * 86400e3);
+    this.h.run('INSERT INTO sessions (token_hash, user_id, created_at, expires_at, ua, ip, via) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      sha256(token), userId, now, expires, String(ua || '').slice(0, 200), ip, via);
+    this.h.run('UPDATE users SET last_login_at = ? WHERE id = ?', now, userId);
     this.h.run('DELETE FROM sessions WHERE expires_at < ?', now);
-    return { token, expires, user: this.user(u.id) };
+    return { token, expires, user: this.user(userId) };
+  }
+
+  // --- Telegram mini app: a Telegram account linked to a user opens the app without the password ---------------
+
+  /** The linked user's new session, or null when this Telegram account isn't linked to anyone. */
+  telegramLogin(tg, { ip, ua }) {
+    const u = this.h.get('SELECT id, disabled FROM users WHERE telegram_id = ?', tg.id);
+    if (!u) return null;
+    if (u.disabled) throw httpError(403, "Hisobingiz o'chirilgan. Rahbaringizga murojaat qiling");
+    this.h.run('UPDATE users SET telegram_name = ? WHERE id = ?', tg.name, u.id);
+    return this.startSession(u.id, { ip, ua, via: 'telegram' });
+  }
+
+  /**
+   * Links the Telegram account to the user whose login and password these are, and starts a session. One Telegram
+   * account per user and one user per Telegram account: linking moves it, and ends the sessions the move takes away.
+   * Throttled like the login form, per address and per Telegram account.
+   */
+  telegramLink(tg, username, password, { ip, ua }) {
+    const now = Date.now();
+    const tgKey = `tg:${tg.id}`;
+    this._checkLock(ip, now);
+    this._checkLock(tgKey, now);
+    const u = this.h.get('SELECT * FROM users WHERE username = ?', String(username || ''));
+    const matches = verifyPassword(password || '', u ? u.pass_hash : dummy());
+    if (!u || u.disabled || !matches) {
+      this._countFailure(ip, now);
+      this._countFailure(tgKey, now);
+      throw httpError(401, "Login yoki parol noto'g'ri");
+    }
+    this.attempts.delete(ip);
+    this.attempts.delete(tgKey);
+    this.h.tx(() => {
+      const before = this.h.get('SELECT id FROM users WHERE telegram_id = ?', tg.id);
+      if (before && before.id !== u.id) this.telegramUnlink(before.id);
+      if (u.telegram_id && u.telegram_id !== tg.id) this.telegramUnlink(u.id);
+      this.h.run('UPDATE users SET telegram_id = ?, telegram_name = ? WHERE id = ?', tg.id, tg.name, u.id);
+    });
+    return this.startSession(u.id, { ip, ua, via: 'telegram' });
+  }
+
+  /** The mini app stops opening for this user; its open sessions end. The login form still works. */
+  telegramUnlink(userId) {
+    if (!this.h.get('SELECT 1 FROM users WHERE id = ?', userId)) throw httpError(404, 'Foydalanuvchi topilmadi');
+    this.h.run('UPDATE users SET telegram_id = NULL, telegram_name = NULL WHERE id = ?', userId);
+    this.h.run("DELETE FROM sessions WHERE user_id = ? AND via = 'telegram'", userId);
+    return this.user(userId);
   }
 
   logout(token) {

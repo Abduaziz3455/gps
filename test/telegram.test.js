@@ -55,7 +55,7 @@ function fakeTelegram(t) {
 
 const NOLOG = {};
 
-function rig(t, api, { chatIds = [], adminIds = ['100'], allVehicles = true, gps = null, reportTime = '22:00', reportTo = 'groups' } = {}) {
+function rig(t, api, { chatIds = [], adminIds = ['100'], allVehicles = true, gps = null, reportTime = '22:00', reportTo = 'groups', miniApp = false } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-'));
   const db = open(':memory:');
   const h = helpers(db);
@@ -69,7 +69,8 @@ function rig(t, api, { chatIds = [], adminIds = ['100'], allVehicles = true, gps
       { channel: 4, name: 'ANPR-1', direction: 'in', contextChannel: 5, contextName: "Yo'l-2", topView: { from: -2, to: 2, expect: 0 } },
       { channel: 3, name: 'ANPR-2', direction: 'out', contextChannel: 6, contextName: "Yo'l-1", topView: { from: -2, to: 2, expect: 0 } },
     ], resolveAfterSec: 90, exitConfirmMin: 5, matchBeforeSec: 45, matchAfterSec: 90, pollSeconds: 60, catchupHours: 6, backfillDays: 0, keepPhotosDays: 0, topViewWorkers: 2 },
-    telegram: { token: 'TESTTOKEN', apiBase: api.url, chatIds, adminIds, allVehicles, reportTime, reportTo },
+    telegram: { token: 'TESTTOKEN', apiBase: api.url, chatIds, adminIds, allVehicles, reportTime, reportTo, miniApp },
+    publicOrigin: 'https://tbb.example',
   };
   const cap = Buffer.from([0xff, 0xd8, 1, 0xff, 0xd9]);
   const topView = { calls: 0, result: { jpeg: Buffer.from([0xff, 0xd8, 2, 0xff, 0xd9]), share: 0.3, t: 1, frames: 4, passes: 1 }, async ready() { return this.isReady !== false; }, async grab() { this.calls++; if (this.error) throw this.error; return this.result; }, stop() {} };
@@ -571,4 +572,67 @@ test('work survives a restart: a pending top view and a queued alert are picked 
   assert.equal(r.outbox.counts('telegram').pending, 1);
   await r.outbox.drain();
   assert.equal(r.outbox.counts('telegram').sent, 1);
+});
+
+test('mini app: the menu button, /app in private chats and groups, a link in every alert', async (t) => {
+  const api = await fakeTelegram(t);
+  const r = rig(t, api, { chatIds: ['-500'], miniApp: true });
+  r.telegram.recipients.add('-500', 'group', 'TBB');
+  const bot = r.telegram.bot;
+  bot.me = { username: 'test_bot' };
+  const last = (chat) => api.sent('sendMessage').filter((c) => c.fields.chat_id === String(chat)).at(-1)?.fields;
+  const say = (text, user, chat, type = 'private') => bot.handle({ text, from: { id: user }, chat: { id: chat, type, title: 'G' } });
+
+  // The button next to the message box, set once.
+  await bot.menuButton();
+  await bot.menuButton();
+  const buttons = api.sent('setChatMenuButton');
+  assert.equal(buttons.length, 1, 'not set again on every start');
+  assert.deepEqual(JSON.parse(buttons[0].fields.menu_button), { type: 'web_app', text: 'Ochish', web_app: { url: 'https://tbb.example/tg/' } });
+
+  // /app: anyone in a private chat gets the in-chat button; a connected group gets a t.me link; others nothing.
+  await say('/app', 7, 7);
+  assert.deepEqual(JSON.parse(last(7).reply_markup).inline_keyboard[0][0].web_app, { url: 'https://tbb.example/tg/' });
+  await say('/app', 7, -500, 'supergroup');
+  assert.equal(JSON.parse(last(-500).reply_markup).inline_keyboard[0][0].url, 'https://t.me/test_bot?startapp');
+  const quiet = api.calls.length;
+  await say('/app', 7, -600, 'supergroup');
+  assert.equal(api.calls.length, quiet);
+  await say('/yordam', 100, 100);
+  assert.match(last(100).text, /\/app — ilovani ochish/);
+  assert.ok(bot.menu(['public']).some(([c]) => c === 'app'), 'in the menu of every private chat');
+
+  // A gate alert ends with a link to that pass in the app.
+  const ev = await r.capture(4, Date.now() - 20e3, '85450KBA');
+  await r.settle();
+  await r.settle(ev.t + 110e3);
+  await r.outbox.drain();
+  const caption = JSON.parse(api.sent('sendMediaGroup')[0].fields.media)[0].caption;
+  assert.ok(caption.endsWith(`📱 <a href="https://t.me/test_bot?startapp=e${ev.id}">Ilovada ochish</a>`), caption);
+
+  // An outage message links to the alerts.
+  r.telegram.onAlert({ id: 9, type: 'system', severity: 'critical', title: "Zavodda internet yo'q", data: { part: 'site' } });
+  assert.match(JSON.parse(r.h.get('SELECT payload FROM outbox WHERE ref = 9').payload).text, /startapp=a">Ilovada ochish/);
+});
+
+test('mini app off: no /app, no links; a menu button set earlier is put back to Telegram\'s own', async (t) => {
+  const api = await fakeTelegram(t);
+  const r = rig(t, api, { chatIds: ['555'] });
+  const bot = r.telegram.bot;
+  bot.me = { username: 'test_bot' };
+  r.h.kvSet('tg_menu_button', 'https://tbb.example/tg/');
+  await bot.menuButton();
+  assert.deepEqual(JSON.parse(api.sent('setChatMenuButton')[0].fields.menu_button), { type: 'default' });
+  assert.equal(r.h.kvGet('tg_menu_button'), null);
+  await bot.menuButton();
+  assert.equal(api.sent('setChatMenuButton').length, 1);
+
+  await bot.handle({ text: '/app', from: { id: 100 }, chat: { id: 100, type: 'private' } });
+  assert.match(api.sent('sendMessage').at(-1).fields.text, /Bunday buyruq yo'q/);
+  assert.equal(r.telegram.appLink('e1'), null);
+  const ev = await r.capture(4, Date.now() - 20e3, '85450KBA');
+  await r.settle();
+  await r.settle(ev.t + 110e3);
+  await r.outbox.drain();
+  assert.doesNotMatch(JSON.parse(api.sent('sendMediaGroup')[0].fields.media)[0].caption, /t\.me|Ilovada/);
 });

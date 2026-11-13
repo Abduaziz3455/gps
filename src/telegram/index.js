@@ -36,8 +36,12 @@ class Telegram {
     this.recipients = new Recipients({ h, configured: this.cfg.chatIds });
     this.details = new GateDetails({ h, gps, poller, config, log });
     this.reports = new Reports({ h, analytics, poller, gate, config, places, log });
-    this.bot = new Bot({ tg: this.tg, h, recipients: this.recipients, adminIds: this.cfg.adminIds, log });
-    registerCommands(this.bot, { ...ctx, tg: this.tg, recipients: this.recipients, reports: this.reports });
+    // The mini app (docs/telegram-mini-app-plan.md): advertised by the bot only once it is set up in BotFather.
+    this.miniAppUrl = this.cfg.miniApp && config.publicOrigin ? `${config.publicOrigin}/tg/` : null;
+    if (this.cfg.miniApp && !config.publicOrigin) log.warn?.('TELEGRAM_MINI_APP is on but PUBLIC_ORIGIN is empty: the mini app is not offered');
+    this.bot = new Bot({ tg: this.tg, h, recipients: this.recipients, adminIds: this.cfg.adminIds, miniAppUrl: this.miniAppUrl, log });
+    const miniApp = this.miniAppUrl ? { url: this.miniAppUrl, link: (p) => this.appLink(p) } : null;
+    registerCommands(this.bot, { ...ctx, tg: this.tg, recipients: this.recipients, reports: this.reports, miniApp });
     outbox.register(CHANNEL, (row) => this.send(row), { onGiveUp: (row, e) => this.gaveUp(row, e) });
     this.listeners = {
       'gate:final': (ev) => this.onGate(ev),
@@ -64,7 +68,17 @@ class Telegram {
     if (a.type !== 'system' || a.silent) return;
     const chats = new Set(this.cfg.adminIds);
     if (GROUP_PARTS.has(a.data?.part)) for (const g of this.recipients.groups()) chats.add(g);
-    for (const chat of chats) this.outbox.enqueue({ channel: CHANNEL, target: chat, kind: 'text', ref: a.id, payload: { text: systemText(a) }, dedupe: `alert:${a.id}` });
+    for (const chat of chats) this.outbox.enqueue({ channel: CHANNEL, target: chat, kind: 'text', ref: a.id, payload: { text: systemText(a, { appLink: this.appLink('a') }) }, dedupe: `alert:${a.id}` });
+  }
+
+  /**
+   * A t.me link that opens the mini app at `param` (e123: gate event, v45: vehicle, a: alerts), from any chat. Needs
+   * the bot's username, known from getMe once the bot has started; until then, null.
+   */
+  appLink(param = '') {
+    const bot = this.bot.me.username;
+    if (!this.miniAppUrl || !bot) return null;
+    return `https://t.me/${bot}?startapp${param ? `=${param}` : ''}`;
   }
 
   text(chats, text, dedupe) {
@@ -88,7 +102,7 @@ class Telegram {
     if (have) return have;
     const details = await this.details.forEvent(ev);
     const late = Date.now() - ev.t;
-    const caption = gateCaption(ev, details, { delayMs: late > LATE_AFTER_MS ? late : null });
+    const caption = gateCaption(ev, details, { delayMs: late > LATE_AFTER_MS ? late : null, appLink: this.appLink(`e${ev.id}`) });
     this.h.run('INSERT OR IGNORE INTO tg_alerts (event_id, caption, built_at) VALUES (?, ?, ?)', ev.id, caption, Date.now());
     return this.h.get('SELECT * FROM tg_alerts WHERE event_id = ?', ev.id);
   }

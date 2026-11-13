@@ -105,6 +105,9 @@ const config = {
     allVehicles: bool(env.TELEGRAM_ALL_VEHICLES, true), // false: alerts for GPS vehicles only
     reportTime: env.REPORT_TIME === undefined ? '22:00' : env.REPORT_TIME, // daily report; empty turns it off
     reportTo: env.REPORT_TO || 'groups',      // admins | groups (admins + alert groups) | all (+ users)
+    // The mini app (public/tg/, docs/telegram-mini-app-plan.md): the bot's menu button, /app and the links in alerts.
+    // Turn on after it is set up in BotFather. The page and its login work either way.
+    miniApp: bool(env.TELEGRAM_MINI_APP, false),
   },
 
   tiles: { url: env.TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' },

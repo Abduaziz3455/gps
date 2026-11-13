@@ -240,6 +240,13 @@ CREATE TABLE IF NOT EXISTS tg_alerts (         -- what was sent for a gate event
 
 /** Columns added after the first release. CREATE TABLE IF NOT EXISTS doesn't touch a table that already exists. */
 const ADDED_COLUMNS = {
+  users: {
+    telegram_id: 'TEXT',     // the Telegram account linked to this user in the mini app (src/telegram/webapp.js)
+    telegram_name: 'TEXT',   // its name as Telegram gave it, for Settings → Users
+  },
+  sessions: {
+    via: 'TEXT',             // NULL: the login form. telegram: the mini app (ends when Telegram is unlinked)
+  },
   vehicles: {
     camera_only: 'INTEGER NOT NULL DEFAULT 0', // 1: our truck with no GPS tracker, known by its plate alone
   },
@@ -263,6 +270,7 @@ function open(file) {
     const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
     for (const [col, type] of Object.entries(cols)) if (!have.has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
   }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_telegram ON users(telegram_id) WHERE telegram_id IS NOT NULL');
   db.exec("CREATE INDEX IF NOT EXISTS gate_events_work ON gate_events(alert_state, top_view) WHERE alert_state = 'pending' OR top_view = 'pending'");
   return db;
 }

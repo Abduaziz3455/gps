@@ -113,7 +113,7 @@ at once. Each event's state is in `gate_events.top_view`, so a restart carries o
 | `src/push.js` | Web Push subscriptions, per-device preferences, delivery, dead-subscription cleanup |
 | `src/cameras/topview.js` | The photo with the load, from the recording (section 2a) |
 | `src/notify/outbox.js` | Durable delivery queue, per recipient. A new channel is one `register()` |
-| `src/telegram/*` | The bot: API client, commands, recipients, alert format, scheduled reports (section 7b) |
+| `src/telegram/*` | The bot: API client, commands, recipients, alert format, scheduled reports (section 7b); `webapp.js` checks the mini app's login (7c) |
 | `src/reports.js` | Daily and monthly report, the yard and the camera-vs-GPS check as text |
 | `src/gatedetails.js` | What GPS adds to a gate event: crossing, trip, fuel, today's km, odometer |
 | `src/sse.js` | Live stream to browsers: positions, gate events, alerts, system health |
@@ -124,7 +124,7 @@ at once. Each event's state is in `gate_events.top_view`, so a restart carries o
 
 | Table | Size | Notes |
 |---|---|---|
-| `users`, `sessions` | people | role `owner` or `dispatcher`; sessions are hashed random tokens, 30 days |
+| `users`, `sessions` | people | role `owner` or `dispatcher`; sessions are hashed random tokens, 30 days (the mini app's: 1 day, `via = 'telegram'`); `users.telegram_id` is the Telegram account linked in the mini app |
 | `vehicles` | 20 | synced from GPS hourly; the owner edits **type** (mixer / dump / excavator / other), the **real plate** when the GPS name differs, a display name and the fuel norm |
 | `positions` | ~30k/day | a sample when the vehicle moved > 25 m, changed status, or every 2 min; kept 180 days. Track replay, distance checks |
 | `yard_visits` | | GPS: vehicle entered / left the yard circle |
@@ -385,6 +385,30 @@ instead of minutes. A vehicle's trips are `max(exits, entries)`, as everywhere i
 evidence is noisy (it maps 10834HDA to the GPS vehicle named 10 870 HAD). Mixers are matched by the app's own "same digits and
 letters" rule, which also gives them GPS details the old bot lacked.
 
+## 7c. Telegram mini app
+
+`public/tg/` and `public/js/tg/`: a phone-sized, mostly read-only version of the app that opens inside the bot. Plan and
+decisions: docs/telegram-mini-app-plan.md. It reuses everything: the same API, live stream, role checks, `api.js`,
+`ui.js`, `map.js` and `app.css`. Only acknowledging alerts writes anything.
+
+**Login.** Telegram gives the page `initData`, signed with the bot token. `POST /api/auth/telegram` checks it
+(`src/telegram/webapp.js`: HMAC, at most a day old) and, when that Telegram account is linked to a user, sets the usual
+session cookie, with `via = 'telegram'` and a one-day life; the next opening makes a new one. Not linked: the page asks
+for the site login once (`POST /api/auth/telegram/link`, throttled per address and per Telegram account like the login
+form) and stores the Telegram id on the user. One Telegram account per user and the other way round; linking moves it
+and ends the sessions the move takes away. Unlinking (the person in the app, or the owner in Settings → Users) ends the
+mini app's sessions and leaves the site login alone. Disabling a user ends both.
+
+**Serving.** `/tg/` gets its own Content-Security-Policy, which also allows `https://telegram.org` (Telegram asks for its
+script to be loaded from there). Every other page keeps `script-src 'self'`. Frames stay forbidden, so Telegram Web in
+a browser (which shows mini apps in a frame) is not supported; Telegram's apps open the page directly.
+
+**The bot.** With `TELEGRAM_MINI_APP=1` and `PUBLIC_ORIGIN` set: the menu button in private chats opens the app (set once,
+remembered in `kv`; put back to Telegram's own when switched off), `/app` answers with a button (private chats) or a
+`t.me/<bot>?startapp` link (groups, where Telegram allows no in-chat app buttons), and every gate alert and outage message
+ends with an "Ilovada ochish" link: `startapp=e<event>` opens the pass, `v<vehicle>` a truck, `a` the alerts. A link, not
+a button, because gate alerts are photo albums, which can't carry buttons.
+
 ### Map tiles must not hold up the GPS polls
 
 On 5 Nov 2026 live GPS stopped for 12 minutes while the map was in heavy use, although GoGPS and our internet were
@@ -408,6 +432,9 @@ timed out behind them, for minutes after the tile requests had stopped. Three th
 - The first owner account comes from `OWNER_USERNAME` / `OWNER_PASSWORD` on the first start; more with
   `npm run user`.
 
+- The mini app: the bot token is also the key that signs who opened it, so it stays on the server; `initData` is never
+  logged. After linking, whoever holds that Telegram account opens the app without a password: turn on Telegram's
+  two-step verification, and unlink in Settings → Users when a phone or person leaves.
 - The bot token and the RTSP login are server-only. Neither appears in logs or error messages: Telegram errors are reduced to a code,
   ffmpeg's messages have the URL removed.
 

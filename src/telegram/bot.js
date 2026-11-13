@@ -7,6 +7,7 @@
  *   public  anyone, in a private chat
  *   group   anyone in a connected alert group, and admins
  *   admin   admins (ADMIN_IDS), in their private chat or in a group
+ *   any     anyone in a private chat, anyone in a connected alert group, and admins
  * Anyone else gets their Telegram id from /start or /id, so that an admin can add them.
  */
 const { TelegramError } = require('./client');
@@ -16,8 +17,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const COMMAND_RE = /^\/([A-Za-z0-9_]+)(?:@(\S+))?(?:\s+(.*))?$/s;
 
 class Bot {
-  constructor({ tg, h, recipients, adminIds, log = console }) {
+  constructor({ tg, h, recipients, adminIds, miniAppUrl = null, log = console }) {
     this.tg = tg;
+    this.miniAppUrl = miniAppUrl; // the menu button opens the mini app there (docs/telegram-mini-app-plan.md)
     this.h = h;
     this.recipients = recipients;
     this.admins = new Set(adminIds.map(String));
@@ -30,8 +32,9 @@ class Bot {
   }
 
   /**
-   * @param {{name: string, description?: string, access?: 'public'|'group'|'admin', slow?: boolean, aliases?: string[],
-   *   hidden?: boolean, run: (ctx: {args: string[], chat: object, user: string, msg: object, bot: Bot}) => string|Promise<string>}} c
+   * @param {{name: string, description?: string, access?: 'public'|'group'|'admin'|'any', slow?: boolean, aliases?: string[],
+   *   hidden?: boolean, run: (ctx: {args: string[], chat: object, user: string, msg: object, bot: Bot}) => Answer|Promise<Answer>}} c
+   * An Answer is the reply's text, or {text, keyboard} with an inline keyboard (rows of buttons).
    */
   command(c) {
     this.commands.set(c.name, { access: 'admin', ...c });
@@ -41,7 +44,7 @@ class Bot {
 
   /** Menu entries for an access level. */
   menu(levels) {
-    return [...this.commands.values()].filter((c) => c.description && !c.hidden && levels.includes(c.access)).map((c) => [c.name, c.description]);
+    return [...this.commands.values()].filter((c) => c.description && !c.hidden && (levels.includes(c.access) || c.access === 'any')).map((c) => [c.name, c.description]);
   }
 
   // --- polling ---------------------------------------------------------------------------------
@@ -92,6 +95,23 @@ class Bot {
     } catch (e) {
       this.log.warn?.(`telegram setup (command menus) failed: ${e.message}`);
     }
+    await this.menuButton();
+  }
+
+  /** The mini app's button in private chats; put back to Telegram's own when the mini app is switched off. */
+  async menuButton() {
+    const set = this.h.kvGet('tg_menu_button');
+    try {
+      if (this.miniAppUrl && set !== this.miniAppUrl) {
+        await this.tg.setMenuButton({ type: 'web_app', text: 'Ochish', web_app: { url: this.miniAppUrl } });
+        this.h.kvSet('tg_menu_button', this.miniAppUrl);
+      } else if (!this.miniAppUrl && set) {
+        await this.tg.setMenuButton({ type: 'default' });
+        this.h.run("DELETE FROM kv WHERE k = 'tg_menu_button'");
+      }
+    } catch (e) {
+      this.log.warn?.(`telegram menu button failed: ${e.message}`);
+    }
   }
 
   async groupMenu(chatId, on) {
@@ -118,7 +138,8 @@ class Bot {
     const cmd = this.commands.get(name);
     const inAlertGroup = !isPrivate && this.recipients.groups().includes(String(chat.id));
 
-    const allowed = cmd && (isAdmin || (cmd.access === 'public' && isPrivate) || (cmd.access === 'group' && inAlertGroup));
+    const allowed = cmd && (isAdmin || (cmd.access === 'public' && isPrivate) || (cmd.access === 'group' && inAlertGroup)
+      || (cmd.access === 'any' && (isPrivate || inAlertGroup)));
     if (!allowed) {
       if (isAdmin) await this.reply(chat.id, "Bunday buyruq yo'q. /yordam");
       else if (isPrivate) await this.reply(chat.id, 'Bu buyruqlar faqat administrator uchun.');
@@ -137,9 +158,10 @@ class Bot {
     if (answer) await this.reply(chat.id, answer);
   }
 
-  async reply(chat, text) {
+  async reply(chat, answer) {
+    const { text, keyboard } = typeof answer === 'string' ? { text: answer } : answer;
     try {
-      await this.tg.sendText(text, chat);
+      await this.tg.sendText(text, chat, keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {});
     } catch (e) {
       if (!(e instanceof TelegramError)) throw e;
       this.log.warn?.(`reply to ${chat} failed: ${e.message}`);
