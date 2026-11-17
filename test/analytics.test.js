@@ -68,3 +68,19 @@ test('rollup reads the three GoGPS reports and the gate events', async () => {
   const byV = a.byVehicle(day, day);
   assert.equal(byV[0].fuelPer100, Math.round((60 / 120.5) * 1000) / 10);
 });
+
+test('a vehicle removed from GoGPS does not keep its old days stale for good', async () => {
+  const h = helpers(open(':memory:'));
+  h.run("INSERT INTO vehicles (id, name, updated_at) VALUES (1, 'A', 0), (2, 'B', 0)");
+  const gps = { mileage: async () => [], fuel: async () => [], fuelInOut: async () => [] };
+  const a = new Analytics({ h, gps, config });
+  const day = T.addDays(T.today(), -3);
+  const during = T.dayStart(day) + 8 * 3600e3;
+  // Rolled up during that day for both; then B left GoGPS before the day was rolled up again.
+  for (const id of [1, 2]) h.run('INSERT INTO daily_stats (day, vehicle_id, updated_at) VALUES (?, ?, ?)', day, id, during);
+  assert.ok(a.staleDays(5).includes(day));
+  h.run('UPDATE vehicles SET in_gps = 0 WHERE id = 2');
+  await a.rollup(day);
+  assert.ok(!a.staleDays(5).includes(day), 'B is not followed any more: its row does not count');
+  assert.equal(h.get('SELECT updated_at u FROM daily_stats WHERE day = ? AND vehicle_id = 2', day).u, during, 'its row stays as it was');
+});

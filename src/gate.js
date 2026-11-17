@@ -389,6 +389,8 @@ class Gate {
         this.topNext.set(row.id, Date.now() + PLAYABLE_POLL_MS);
         return;
       }
+      // The NVR refuses the recording (17 Nov 2026: the top cameras had stopped recording after the plant lost power).
+      this.log.warn?.(`top view ch${cam.contextChannel} of event ${row.id} failed: the NVR has no recording of it`);
       return this.topViewDone(row.id, 'failed', 'yozuv tayyor bo\'lmadi');
     }
     let shot;
@@ -434,6 +436,12 @@ class Gate {
     this.h.run('UPDATE gate_events SET top_view = ?, top_view_note = ? WHERE id = ?', state, note, id);
     const ev = this.get(id);
     if (ev) bus.emit('gate:update', ev);
+  }
+
+  /** The newest finished top views (done, none, failed), newest first. */
+  recentTopViews(limit, sinceMs) {
+    return this.h.all(`SELECT id, t, top_view state, top_view_note note FROM gate_events
+      WHERE t >= ? AND top_view IN ('done', 'none', 'failed') ORDER BY t DESC LIMIT ?`, sinceMs, limit);
   }
 
   /** Top views of the last hours, for the status page and the health check. */

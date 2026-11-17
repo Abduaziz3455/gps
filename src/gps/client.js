@@ -24,13 +24,30 @@ class GpsClient {
     this.lanes = { live: { chain: Promise.resolve(), last: 0 }, report: { chain: Promise.resolve(), last: 0 }, bulk: { chain: Promise.resolve(), last: 0 } };
     this.lastOk = 0;
     this.lastError = null;
+    this.refused = null; // {error, until, delayMs}: GoGPS refused the login; it isn't asked again before `until`
   }
 
-  async _auth() {
+  /**
+   * GoGPS answers a refused login with 200 and {"Error": "..."} instead of an AuthId, e.g. "Учётная запись
+   * заблокирована" when it blocked the account (16 Nov 2026). The reason goes into the error. A refused login is not
+   * tried again at once: after 1 minute, then 2, 4, up to 10, so a blocked account isn't hammered every 10 s.
+   */
+  async _auth(now = Date.now()) {
+    if (this.refused && now < this.refused.until) throw this.refused.error;
     const r = await this._fetch('/api/v3/auth/login', { login: this.login, password: this.password }, 30000, false);
-    if (!r.ok) throw new GpsError(`GPS login failed (HTTP ${r.status})`);
-    const data = await r.json().catch(() => ({}));
-    if (!data.AuthId) throw new GpsError('GPS login failed: no AuthId');
+    let reason = null;
+    if (r.status === 401 || r.status === 403) reason = `HTTP ${r.status}`;
+    else if (!r.ok) throw new GpsError(`GPS login failed (HTTP ${r.status})`); // GoGPS itself is down: retried as usual
+    const data = reason ? {} : await r.json().catch(() => ({}));
+    if (!reason && !data.AuthId) reason = typeof data.Error === 'string' && data.Error.trim() ? data.Error.trim().slice(0, 120) : 'no AuthId';
+    if (reason) {
+      const error = new GpsError(reason.startsWith('HTTP') ? `GPS login failed (${reason})` : `GPS login failed: ${reason}`);
+      error.permanent = true;
+      const delayMs = Math.min(this.refused ? this.refused.delayMs * 2 : 60e3, 10 * 60e3);
+      this.refused = { error, until: Date.now() + delayMs, delayMs };
+      throw error;
+    }
+    this.refused = null;
     this.token = data.AuthId;
   }
 

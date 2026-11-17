@@ -97,9 +97,14 @@ function diagnose(obs) {
     return out;
   }
   if (obs.gps && !obs.gps.ok) {
+    // GoGPS's own words when it gave any ("Учётная запись заблокирована": the account is blocked, not a wrong password).
+    const why = /login failed: (.+)$/.exec(obs.gps.error || '')?.[1];
+    const said = why && why !== 'no AuthId' ? why : null;
     out.push(gpsErrorKind(obs.gps.error) === 'auth'
       ? { key: 'gps_auth', part: 'gps', severity: 'critical', title: 'GPS tizimiga kirib bo\'lmayapti',
-        text: "baku.gps.az login yoki parolni qabul qilmadi. Parol o'zgargan bo'lsa, serverdagi .env faylida GPS_PASSWORD ni yangilang. Hozir mashinalar joylashuvi yangilanmayapti." }
+        text: said
+          ? `baku.gps.az kirishga ruxsat bermadi, javobi: «${said}». Hisob bloklangan bo'lsa, GoGPS bilan bog'laning (to'lov yoki hisob holati); parol o'zgargan bo'lsa, serverdagi .env faylida GPS_PASSWORD ni yangilang. Hozir mashinalar joylashuvi yangilanmayapti.`
+          : "baku.gps.az login yoki parolni qabul qilmadi. Parol o'zgargan bo'lsa, serverdagi .env faylida GPS_PASSWORD ni yangilang. Hozir mashinalar joylashuvi yangilanmayapti." }
       : { key: 'gps_down', part: 'gps', severity: 'critical', title: 'GPS xizmati javob bermayapti',
         text: "baku.gps.az (GoGPS) javob bermayapti. Bizning internet ishlayapti, muammo GPS xizmati tomonida. Mashinalar joylashuvi yangilanmayapti; xizmat tiklanganda o'zi davom etadi." });
   }

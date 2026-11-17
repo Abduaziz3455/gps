@@ -144,7 +144,18 @@ class Poller {
 
   start() {
     const loop = async () => {
-      try { await this.tick(); } catch (e) { this.log.warn?.(`GPS poll failed: ${e.message}`); }
+      try {
+        await this.tick();
+        if (this.failing) this.log.info?.(`GPS poll: back after ${Math.round((Date.now() - this.failing.since) / 60e3)} min`);
+        this.failing = null;
+      } catch (e) {
+        // The same failure is logged once, then every 10 minutes while it lasts: GoGPS down for an hour was 360 lines.
+        const now = Date.now();
+        if (!this.failing || this.failing.message !== e.message || now - this.failing.logged >= 10 * 60e3) {
+          this.log.warn?.(`GPS poll failed: ${e.message}${this.failing?.message === e.message ? ` (still, ${Math.round((now - this.failing.since) / 60e3)} min)` : ''}`);
+          this.failing = { message: e.message, since: this.failing?.message === e.message ? this.failing.since : now, logged: now };
+        }
+      }
       this.timer = setTimeout(loop, this.cfg.gps.pollSeconds * 1000);
     };
     loop();

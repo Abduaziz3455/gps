@@ -17,6 +17,10 @@ test('diagnosis names the broken link', () => {
   // GoGPS
   assert.deepEqual(keys({ gps: { ok: false, error: 'GPS login failed (HTTP 401)' } }), ['gps_auth']);
   assert.deepEqual(keys({ gps: { ok: false, error: '/api/v3/vehicles/getlastdata: timeout' } }), ['gps_down']);
+  const blocked = diagnose({ ...ok, gps: { ok: false, error: 'GPS login failed: Учётная запись заблокирована' } });
+  assert.deepEqual(blocked.map((p) => p.key), ['gps_auth']);
+  assert.match(blocked[0].text, /«Учётная запись заблокирована»/, "GoGPS's own reason, not a guess about the password");
+  assert.doesNotMatch(diagnose({ ...ok, gps: { ok: false, error: 'GPS login failed: no AuthId' } })[0].text, /«/);
   // plant side
   assert.deepEqual(keys({ nvr: { ok: false, kind: 'refused' } }), ['nvr_down'], 'router answered, NVR did not');
   assert.deepEqual(keys({ nvr: { ok: false, kind: 'timeout' }, router: true }), ['nvr_down'], 'router probe OK -> NVR');

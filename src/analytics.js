@@ -135,13 +135,18 @@ class Analytics {
     if (day === T.today()) bus.emit('stats', { day });
   }
 
-  /** Days in the last `days` that were never computed after they ended. */
+  /**
+   * Days in the last `days` that were never computed after they ended. Only vehicles still followed count: a rollup
+   * leaves the rows of a removed vehicle as they were, so they would keep their day stale for good (from 9 Nov 2026
+   * that day was asked of GoGPS again every 10 minutes).
+   */
   staleDays(days) {
     const today = T.today();
     const out = [];
     for (let i = days; i >= 1; i--) {
       const d = T.addDays(today, -i);
-      const r = this.h.get('SELECT MIN(updated_at) u FROM daily_stats WHERE day = ?', d);
+      const r = this.h.get(`SELECT MIN(s.updated_at) u FROM daily_stats s JOIN vehicles v ON v.id = s.vehicle_id
+        WHERE s.day = ? AND (v.in_gps = 1 OR v.camera_only = 1)`, d);
       if (!r || !r.u || r.u < T.dayStart(d) + T.DAY + 20 * 60e3) out.push(d);
     }
     return out;

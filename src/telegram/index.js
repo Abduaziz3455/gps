@@ -18,6 +18,7 @@ const { Reports } = require('../reports');
 
 const CHANNEL = 'telegram';
 const LATE_AFTER_MS = 6 * 60e3; // the normal way takes up to about 5.5 min (an exit waiting for GPS); later than that is news
+const TOP_VIEW_FAILS = 5; // this many top views in a row failed: a warning
 const STUCK_MS = 10 * 60e3;
 const CONFLICT_RECENT_MS = 2 * 60e3;
 const GROUP_PARTS = new Set(['gps', 'site', 'nvr', 'camera', 'telegram']); // these outages also go to the alert groups
@@ -173,13 +174,19 @@ class Telegram {
     return out;
   }
 
+  /**
+   * The latest top views all failed. Judged on the latest ones, not on the last hour: on 17 Nov 2026 a count per hour
+   * cleared the warning in every quiet hour although nothing had recovered.
+   */
   topViewProblems(now) {
-    const s = this.gate.topViewStats(now - 3600e3);
-    if (s.failed >= 5 && s.failed > s.done) {
-      return [{ key: 'topview_failing', part: 'topview', severity: 'warning', title: "Yuqoridan rasm olib bo'lmayapti",
-        text: `Oxirgi soatda ${s.failed} ta rasm olinmadi. NVR ning 554-porti yopilgan yoki yozuvlar o'qilmayapti bo'lishi mumkin. Xabarlar bitta rasm bilan ketadi.` }];
-    }
-    return [];
+    const last = this.gate.recentTopViews(TOP_VIEW_FAILS, now - 24 * 3600e3);
+    if (last.length < TOP_VIEW_FAILS || last.some((r) => r.state !== 'failed')) return [];
+    const missing = last.filter((r) => r.note === "yozuv tayyor bo'lmadi").length;
+    const why = missing > last.length / 2
+      ? "NVR bu vaqtlarning yozuvini bermayapti: yuqori kameralar (yo'l kameralari) yozilmayotgan bo'lishi mumkin. NVR da shu kameralarning yozuv holatini tekshiring yoki NVR ni qayta yoqing."
+      : `Yozuvni o'qib bo'lmadi (${last[0].note || "noma'lum xato"}). NVR ning 554-porti yopilgan bo'lishi mumkin.`;
+    return [{ key: 'topview_failing', part: 'topview', severity: 'warning', title: "Yuqoridan rasm olib bo'lmayapti",
+      text: `Oxirgi ${last.length} ta o'tishning yuqoridan rasmi olinmadi. ${why} Xabarlar bitta rasm bilan ketadi.` }];
   }
 
   summary() {

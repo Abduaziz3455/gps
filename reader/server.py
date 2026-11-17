@@ -56,6 +56,15 @@ PRE_S = 4.0             # a re-read from the recording starts this long before t
 REC_DELAY_S = float(os.environ.get('READER_REC_DELAY', '60'))
 REC_TRIES = 6           # 15 s apart: the recording may not be there yet
 PARKED_S = 1800         # a plate seen standing still does not ask for a re-read for this long
+# A plate seen only at low confidence whose recording then gave nothing: the same glimpse doesn't ask again for this
+# long. Measured on 3 days of production logs (14-17 Nov 2026): on the exit camera such glimpses asked for 324
+# recordings and 35 gave a pass (a plate read at MIN_CONF asked for 77 and 36 gave one).
+NOISE_S = 1800
+JOBS = 3                # recordings waiting per camera
+KEEP_PASSES_S = 3600    # the app takes only the last 15 minutes after a restart; each pass holds a full-size picture
+# One recording decoded at a time for both cameras: each decoder of the main stream takes about 205 MB. Two at once,
+# beside both live decoders, went over the container's 1.5 GB three times on 16-17 Nov 2026 and it was killed.
+REREAD_DECODE = threading.Lock()
 FORMATS = [re.compile(r'^(\d{2})[A-Z]\d{3}[A-Z]{2}$'), re.compile(r'^(\d{2})\d{3}[A-Z]{3}$')]
 REGIONS = {'01', '10', '20', '25', '30', '40', '50', '60', '70', '75', '80', '85', '90', '95'}
 
@@ -138,8 +147,9 @@ class Engine:
 
 
 class Passes:
-    def __init__(self, keep=300):
+    def __init__(self, keep=100, keep_s=KEEP_PASSES_S):
         self.items = deque(maxlen=keep)
+        self.keep_s = keep_s
         self.seq = 0
         self.boot = os.urandom(6).hex()  # new on every start: the app knows the numbering started again
         self.lock = threading.Lock()
@@ -149,12 +159,56 @@ class Passes:
             self.seq += 1
             p['seq'] = self.seq
             self.items.append(p)
+            old = time.time() - self.keep_s
+            while self.items and self.items[0]['time'] / 1000 < old:
+                self.items.popleft()
         log.info('pass ch%s %s x%d (%d frames read%s)', p['channel'], p['plate'], p['votes'], p['frames'],
                  ', from the recording' if p.get('source') == 'recording' else '')
 
     def after(self, seq):
         with self.lock:
             return [p for p in self.items if p['seq'] > seq]
+
+
+class Jobs:
+    """Recordings waiting to be read, oldest first, at most `size`. A clear job (a plate read once at MIN_CONF) finds
+    a pass about half the time, an unclear one (only low-confidence glimpses) about one time in nine: when the queue is
+    full, a clear job takes the place of the newest unclear one."""
+
+    def __init__(self, size=JOBS):
+        self.size = size
+        self.items = []
+        self.cv = threading.Condition()
+
+    def put(self, job):
+        """Adds the job. Returns the job left out (this one or a dropped unclear one), or None."""
+        with self.cv:
+            out = None
+            if len(self.items) >= self.size:
+                unclear = [j for j in self.items if not j.get('clear')]
+                if not job.get('clear') or not unclear:
+                    return job
+                out = unclear[-1]
+                self.items.remove(out)
+            self.items.append(job)
+            self.cv.notify()
+            return out
+
+    def get(self):
+        with self.cv:
+            while not self.items:
+                self.cv.wait()
+            return self.items.pop(0)
+
+    def get_nowait(self):
+        with self.cv:
+            if not self.items:
+                raise queue.Empty
+            return self.items.pop(0)
+
+    def empty(self):
+        with self.cv:
+            return not self.items
 
 
 def ffmpeg(url, vf, fmt, extra=()):
@@ -183,8 +237,9 @@ class Watcher(threading.Thread):
         self.motion_until = 0.0
         self.pass_ = None
         self.lock = threading.Lock()
-        self.jobs = queue.Queue(maxsize=3)
+        self.jobs = Jobs()
         self.parked = {}  # plate -> when it was last read standing still
+        self.noise = {}   # plate -> when a low-confidence glimpse of it last asked for a recording that gave nothing
         self.stats = Counter()
 
     # --- motion on the sub stream ---------------------------------------------------------------
@@ -339,23 +394,41 @@ class Watcher(threading.Thread):
                              'jpeg': base64.b64encode(b['jpg']).decode()})
         if rec:
             self.stats['rereads_found' if found else 'rereads_empty'] += 1
+            job = ps.get('job') or {}
+            if not found and not job.get('clear'):
+                now = time.time()
+                for p in job.get('seen', ()):
+                    self.noise[p] = now
             if not found:
                 log.info('ch%s: recording %s: no plate read twice (%s)', self.channel, time.strftime('%H:%M:%S', time.localtime(ps['start'])),
                          ', '.join(weak) or f'{ps["frames"]} frames')
             return
         now = time.time()
+        self.parked = {q: t for q, t in self.parked.items() if now - t < PARKED_S}
+        self.noise = {q: t for q, t in self.noise.items() if now - t < NOISE_S}
         # A plate in view that wasn't reported, and isn't one standing in the yard: read the recording of these seconds.
-        parked = [q for q, t in self.parked.items() if now - t < PARKED_S]
-        open_ = [p for p in ps['seen'] if not any(similar(p, q) for q in found + parked)]
+        open_ = sorted(p for p in ps['seen'] if not any(similar(p, q) for q in found + list(self.parked)))
+        clear = any(ps['votes'][p] for p in open_)  # read at MIN_CONF at least once, not only glimpsed
+        if open_ and not clear and all(any(similar(p, q) for q in self.noise) for p in open_):
+            self.stats['rereads_noise'] += 1
+            log.info('ch%s: %s seen only at low confidence, and lately such a recording gave nothing: not read',
+                     self.channel, ', '.join(open_))
+            open_ = []
         if weak:
             log.info('ch%s: %s read too few times in %d frames, not reported%s', self.channel, ', '.join(weak), ps['frames'],
                      '; reading the recording' if open_ and self.can_reread else '')
+        elif open_ and self.can_reread:
+            log.info('ch%s: %s seen only at low confidence in %d frames; reading the recording', self.channel, ', '.join(open_), ps['frames'])
         if open_ and self.can_reread:
-            try:
-                self.jobs.put_nowait({'start': ps['start'], 'end': ps['last'], 'live': ps['frames']})
-            except queue.Full:
+            job = {'start': ps['start'], 'end': ps['last'], 'live': ps['frames'], 'clear': clear, 'seen': open_}
+            out = self.jobs.put(job)
+            if out is not None:
                 self.stats['rereads_skipped'] += 1
-                log.warning('ch%s: too many recordings waiting, this one is not read', self.channel)
+                at = time.strftime('%H:%M:%S', time.localtime(out['start']))
+                if out is job and clear:
+                    log.warning('ch%s: too many recordings waiting, the one of %s is not read', self.channel, at)
+                else:
+                    log.info('ch%s: too many recordings waiting, the unclear one of %s is not read', self.channel, at)
 
     # --- reading the recording ---------------------------------------------------------------------
     def _rereader(self):
@@ -392,6 +465,12 @@ class Watcher(threading.Thread):
                     raise RuntimeError(r.stderr.strip() or f'ffmpeg exit {r.returncode}')
                 time.sleep(15)
         ps = new_pass(job['start'], 'recording')
+        ps['job'] = job
+        with REREAD_DECODE:
+            self._read_clip(ps, clip, start)
+        return ps
+
+    def _read_clip(self, ps, clip, start):
         p = subprocess.Popen(['ffmpeg', '-nostdin', '-v', 'error', '-threads', '1', '-i', clip, '-an', '-vf', f'fps={FPS}',
                               '-c:v', 'mjpeg', '-q:v', '3', '-f', 'image2pipe', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
@@ -407,7 +486,6 @@ class Watcher(threading.Thread):
                     os.remove(clip)
                 except OSError:
                     pass
-        return ps
 
 
 def base_url():

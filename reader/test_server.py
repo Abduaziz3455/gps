@@ -90,7 +90,7 @@ class Decide(unittest.TestCase):
         frames(w, ps, [[], [read('85159YAA')], [read('85150VAA', conf=0.4)]])
         w._finish(ps)
         self.assertEqual(w.passes.items, [])
-        self.assertEqual(w.jobs.get_nowait(), {'start': 1000, 'end': 1003, 'live': 3})
+        self.assertEqual(w.jobs.get_nowait(), {'start': 1000, 'end': 1003, 'live': 3, 'clear': True, 'seen': ['85150VAA', '85159YAA']})
 
     def test_a_weak_plate_seen_only_at_low_confidence_asks_for_the_recording_too(self):
         w = watcher()
@@ -126,10 +126,83 @@ class Decide(unittest.TestCase):
         self.assertEqual(len(w.passes.items), 1)
         self.assertTrue(w.jobs.empty(), 'a recording is never read again')
 
+    def test_a_glimpse_whose_recording_gave_nothing_does_not_ask_again(self):
+        w = watcher()
+        ps = server.new_pass(1000, 'live')
+        frames(w, ps, [[read('85964DDA', conf=0.2)], []])
+        w._finish(ps)
+        job = w.jobs.get_nowait()
+        self.assertFalse(job['clear'])
+        rec = server.new_pass(1000, 'recording')
+        rec['job'] = job
+        frames(w, rec, [[], []])
+        w._finish(rec)  # the recording gave nothing
+        ps = server.new_pass(1100, 'live')
+        frames(w, ps, [[read('85964DDA', conf=0.3)], []])
+        w._finish(ps)
+        self.assertTrue(w.jobs.empty(), 'the same glimpse again: not read')
+        self.assertEqual(w.stats['rereads_noise'], 1)
+        ps = server.new_pass(1200, 'live')
+        frames(w, ps, [[read('85964DDA', conf=0.9)], []])
+        w._finish(ps)
+        self.assertTrue(w.jobs.get_nowait()['clear'], 'read once at good confidence: always read')
+        ps = server.new_pass(1300, 'live')
+        frames(w, ps, [[read('10873HDA', conf=0.3)], []])
+        w._finish(ps)
+        self.assertFalse(w.jobs.empty(), 'another plate glimpsed: read')
+
+    def test_a_glimpse_whose_recording_gave_a_pass_still_asks_next_time(self):
+        w = watcher()
+        ps = server.new_pass(1000, 'live')
+        frames(w, ps, [[read('85159YAA', conf=0.2)], []])
+        w._finish(ps)
+        rec = server.new_pass(1000, 'recording')
+        rec['job'] = w.jobs.get_nowait()
+        frames(w, rec, [[read('85159YAA', y=100)], [read('85159YAA', y=500)]])
+        w._finish(rec)
+        ps = server.new_pass(1100, 'live')
+        frames(w, ps, [[read('85159YAA', conf=0.2)], []])
+        w._finish(ps)
+        self.assertFalse(w.jobs.empty())
+
+    def test_a_full_queue_keeps_clear_recordings_before_unclear_ones(self):
+        w = watcher()
+        for i, conf in enumerate([0.2, 0.9, 0.2]):
+            ps = server.new_pass(1000 + i * 100, 'live')
+            frames(w, ps, [[read(f'8515{i}YAA', conf=conf)], []])
+            w._finish(ps)
+        ps = server.new_pass(1400, 'live')  # unclear, queue full: left out
+        frames(w, ps, [[read('85154YAA', conf=0.2)], []])
+        w._finish(ps)
+        self.assertEqual([j['start'] for j in w.jobs.items], [1000, 1100, 1200])
+        ps = server.new_pass(1500, 'live')  # clear: takes the newest unclear one's place
+        frames(w, ps, [[read('85155YAA', conf=0.9)], []])
+        w._finish(ps)
+        self.assertEqual([j['start'] for j in w.jobs.items], [1000, 1100, 1500])
+        ps = server.new_pass(1600, 'live')
+        frames(w, ps, [[read('85156YAA', conf=0.9)], []])
+        w._finish(ps)
+        self.assertEqual([j['start'] for j in w.jobs.items], [1100, 1500, 1600])
+        ps = server.new_pass(1700, 'live')  # all clear: this one is left out
+        frames(w, ps, [[read('85157YAA', conf=0.9)], []])
+        w._finish(ps)
+        self.assertEqual([j['start'] for j in w.jobs.items], [1100, 1500, 1600])
+        self.assertEqual(w.stats['rereads_skipped'], 4)
+
     def test_similar(self):
         self.assertTrue(server.similar('85450KBA', '85430KBA'))
         self.assertTrue(server.similar('85159YAA', '5159YAA'))
         self.assertFalse(server.similar('85450KBA', '85159YAA'))
+
+
+class Store(unittest.TestCase):
+    def test_passes_older_than_an_hour_are_let_go(self):
+        ps = server.Passes()
+        now = time.time() * 1000
+        ps.add({'channel': 3, 'plate': '85159YAA', 'votes': 2, 'frames': 9, 'time': now - 2 * 3600e3})
+        ps.add({'channel': 3, 'plate': '85450KBA', 'votes': 2, 'frames': 9, 'time': now - 60e3})
+        self.assertEqual([p['plate'] for p in ps.after(0)], ['85450KBA'])
+        self.assertEqual(ps.seq, 2, 'the numbering goes on')
 
 
 @unittest.skipUnless(os.environ.get('READER_MODELS') and os.environ.get('READER_TEST_VIDEO'), 'needs the models and a video')

@@ -11,6 +11,12 @@ const T = require('./time');
 
 const DEFAULT_PREFS = { gateIn: true, gateOut: true, onlyFleet: false, alerts: true, system: true, quietFrom: '', quietTo: '' };
 
+/** What went wrong, never empty: a connect timeout comes as an AggregateError with no message, only a code. */
+function pushError(e) {
+  if (e?.statusCode) return `HTTP ${e.statusCode}${e.body ? `: ${String(e.body).trim().slice(0, 120)}` : ''}`;
+  return e?.message || e?.code || e?.errors?.map((x) => x.code || x.message).filter(Boolean).join(', ') || e?.name || String(e);
+}
+
 class Push {
   constructor({ h, config, log = console, sender = null }) {
     this.h = h;
@@ -95,7 +101,7 @@ class Push {
         if (e.statusCode === 404 || e.statusCode === 410) this.h.run('DELETE FROM push_subscriptions WHERE id = ?', s.id);
         else {
           this.h.run('UPDATE push_subscriptions SET fails = fails + 1 WHERE id = ?', s.id);
-          this.log.warn?.(`push failed (${e.statusCode || e.message})`);
+          this.log.warn?.(`push failed (${pushError(e)})`);
         }
       }
     }));

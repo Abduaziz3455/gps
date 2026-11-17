@@ -425,6 +425,16 @@ Test period, after the app's misread correction (`plates.correct` against plates
     still gets its photo: our frame comes with it.
   - A re-read takes 40–60 s of reading, and happens only after a weak pass.
   - Plates seen standing still in the last 30 minutes don't ask for one.
+  - **Changed 17 Nov 2026, after 3 days of production logs:**
+    - Only one recording is decoded at a time, for both cameras. Two at once, beside both live decoders, went over the
+      container's 1.5 GB three times on 16–17 Nov, and the kernel killed the reader. Docker didn't flag it as OOM; the
+      kernel log (`journalctl -k`) shows it.
+    - The exit camera asked for about 400 recordings in 3 days. A plate read once at MIN_CONF asked for 77, and 36 of
+      them gave a pass. Low-confidence glimpses asked for 324, and 35 gave one.
+    - Each camera keeps 3 recordings waiting. When the queue is full, a clear one takes the newest glimpse's place.
+    - A glimpse whose recording gave nothing doesn't ask again for 30 minutes.
+    - The reader keeps passes for an hour, at most 100, not the last 300. Each pass holds a full-size picture, and the
+      app takes only the last 15 minutes after a restart.
 - **On the recordings of the misses:** the 06:34 entry was found from the recording (8 reads, right plate). Two exit-camera
   windows had nothing readable, and nothing was reported. One was trucks turning inside the yard; the other was a
   plate the camera never showed clearly.
@@ -433,7 +443,8 @@ Test period, after the app's misread correction (`plates.correct` against plates
   - A plate a few characters from a stronger one, read in the same seconds, is taken as a misread of it.
   - Fleet numbers one character apart (10872HDA, 10873HDA) read at different times stay separate.
 - **Watch:** `/health` of the reader gives per camera `passes_live`, `passes_recording`, `rereads`, `rereads_found`,
-  `rereads_empty`, `rereads_failed`. Log lines: `pass chN … from the recording`, `recording HH:MM:SS: no plate read twice`.
+  `rereads_empty`, `rereads_failed`, `rereads_skipped` (queue full), `rereads_noise` (glimpse not read again). Log
+  lines: `pass chN … from the recording`, `recording HH:MM:SS: no plate read twice`, `… seen only at low confidence`.
 - **Tests:** `python -m unittest reader/test_server.py` (the reader's pass decisions; needs the reader's Python packages).
 - **Camera warnings removed (7 Nov 2026, user's decision):** the health check "ANPR-n kamerasi mashinalarni yozmayapti"
   (`camera_silent`: GPS saw trucks cross, no plate read) is gone. The cameras record video and our reader reads it, so a

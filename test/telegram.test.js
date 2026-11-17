@@ -636,3 +636,23 @@ test('mini app off: no /app, no links; a menu button set earlier is put back to 
   await r.outbox.drain();
   assert.doesNotMatch(JSON.parse(api.sent('sendMediaGroup')[0].fields.media)[0].caption, /t\.me|Ilovada/);
 });
+
+test('top view warning: the latest five failed, whatever the hour; it names the missing recording', async (t) => {
+  const api = await fakeTelegram(t);
+  const r = rig(t, api);
+  const now = Date.now();
+  const row = (i, state, note = null) => r.h.run(`INSERT INTO gate_events (capture_name, t, direction, camera, channel, status, top_view, top_view_note, created_at)
+    VALUES (?, ?, 'in', 'ANPR-1', 4, 'confirmed', ?, ?, 0)`, `tv${i}`, now - (10 - i) * 25 * 60e3, state, note);
+  row(0, 'done');
+  for (let i = 1; i <= 4; i++) row(i, 'failed', "yozuv tayyor bo'lmadi");
+  assert.deepEqual(r.telegram.topViewProblems(now), [], 'four failed: not yet');
+  row(5, 'failed', "yozuv tayyor bo'lmadi"); // spread over two hours: an hourly count would have cleared it
+  const [p] = r.telegram.topViewProblems(now);
+  assert.equal(p.key, 'topview_failing');
+  assert.match(p.text, /yozilmayotgan/);
+  assert.doesNotMatch(p.text, /554/);
+  row(6, 'none');
+  assert.deepEqual(r.telegram.topViewProblems(now), [], 'one read again: recovered');
+  for (let i = 7; i <= 11; i++) row(i, 'failed', 'ffmpeg exit 1');
+  assert.match(r.telegram.topViewProblems(now)[0].text, /554.*|ffmpeg exit 1/);
+});
