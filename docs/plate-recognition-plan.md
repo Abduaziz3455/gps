@@ -442,6 +442,12 @@ Test period, after the app's misread correction (`plates.correct` against plates
   - A pass with two trucks close behind each other now reports both. Before, only the plate read most often was reported.
   - A plate a few characters from a stronger one, read in the same seconds, is taken as a misread of it.
   - Fleet numbers one character apart (10872HDA, 10873HDA) read at different times stay separate.
+  - The reader's rule needs every read of the weaker plate inside the stronger one's seconds (±1 s), and a misread
+    read just after the truck's last clear frame got through. On 17 Nov a recording gave 85942DBA x11 and 85942DDA x3,
+    and 10865HDA x8 and 80865HDA x2: two events each, the misread as an unknown vehicle. Since then the app
+    (`src/cameras/ownreader.js`, which knows the fleet) drops our pass when its plate is not a fleet plate and a similar
+    plate (≤ 2 characters) passed the same camera within 15 s, read in more frames or a fleet plate. Fleet plates are
+    never dropped. Counted in the app's `/health` as `ownReader.misread`.
 - **Watch:** `/health` of the reader gives per camera `passes_live`, `passes_recording`, `rereads`, `rereads_found`,
   `rereads_empty`, `rereads_failed`, `rereads_skipped` (queue full), `rereads_noise` (glimpse not read again). Log
   lines: `pass chN … from the recording`, `recording HH:MM:SS: no plate read twice`, `… seen only at low confidence`.

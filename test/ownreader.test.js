@@ -116,6 +116,42 @@ test('a pass reported twice is one event (repeat window), and weak or malformed 
   assert.deepEqual(events().map((e) => e.plate), ['85450KBA']);
 });
 
+test('one truck read as two plates in the same seconds is one event: the misread is dropped', async () => {
+  const { own, reader, events } = setup();
+  await own.poll();
+  const t = Date.now() - 300e3;
+  // From one recording (17 Nov): the real plate in 11 frames, a one-letter misread in 3, 2 s later.
+  reader.add({ channel: 4, time: t, plate: '85942DBA', conf: 0.98, votes: 11 });
+  reader.add({ channel: 4, time: t + 2e3, plate: '85942DDA', conf: 0.89, votes: 3 });
+  // A fleet truck wins even when its misread was read in more frames.
+  reader.add({ channel: 3, time: t + 60e3, plate: '80450KBA', conf: 0.9, votes: 6 });
+  reader.add({ channel: 3, time: t + 67e3, plate: '85450KBA', conf: 0.99, votes: 4 });
+  await own.poll();
+  await own.release();
+  assert.deepEqual(events().map((e) => e.plate), ['85942DBA', '85450KBA']);
+  assert.equal(own.stats.misread, 2);
+});
+
+test('similar plates are kept when both are fleet trucks, on another camera, or seconds apart', async () => {
+  const { h, own, reader, events } = setup();
+  h.run('INSERT INTO vehicles (id, name, updated_at) VALUES (2, ?, ?)', '85 451 KBA', Date.now());
+  await own.poll();
+  const t = Date.now() - 600e3;
+  reader.add({ channel: 4, time: t, plate: '85450KBA', conf: 0.99, votes: 9 });
+  reader.add({ channel: 4, time: t + 5e3, plate: '85451KBA', conf: 0.99, votes: 3 }); // two fleet trucks in a row
+  reader.add({ channel: 4, time: t + 100e3, plate: '10963DDA', conf: 0.99, votes: 9 });
+  reader.add({ channel: 3, time: t + 102e3, plate: '10964DDA', conf: 0.99, votes: 3 }); // the other camera
+  reader.add({ channel: 4, time: t + 200e3, plate: '10870HDA', conf: 0.99, votes: 9 });
+  reader.add({ channel: 4, time: t + 230e3, plate: '10873HDA', conf: 0.99, votes: 3 }); // 30 s later
+  reader.add({ channel: 4, time: t + 300e3, plate: '01951HOA', conf: 0.99, votes: 3 });
+  reader.add({ channel: 4, time: t + 302e3, plate: '01952HOA', conf: 0.99, votes: 3 }); // read as often
+  await own.poll();
+  await own.release();
+  assert.deepEqual(events().map((e) => e.plate),
+    ['85450KBA', '85451KBA', '10963DDA', '10964DDA', '10870HDA', '10873HDA', '01951HOA', '01952HOA']);
+  assert.equal(own.stats.misread, 0);
+});
+
 test("passes the reader saw before we connected aren't replayed; a restarted reader is picked up again", async () => {
   const { own, reader, events } = setup();
   reader.add({ channel: 4, time: Date.now() - 3600e3, plate: '85450KBA', conf: 0.99 });

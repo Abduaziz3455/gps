@@ -11,6 +11,10 @@
  *                    and ours is dropped. Otherwise ours goes through the tracker and the gate exactly like a
  *                    camera capture (repeat and same-pass windows, plate matching, GPS resolution, alerts), named
  *                    own_<channel>_<ms>.
+ *                    One truck can come back as two plates a character or two apart (85942DBA x11 and 85942DDA x3,
+ *                    from one recording). A plate that is not one of the fleet's, reported within TWIN_MS of a
+ *                    similar plate on the same camera that was read more often or is a fleet plate, is that misread
+ *                    and dropped. Fleet plates are never dropped: real trucks here are one character apart.
  *
  * If the reader is down or slow, the gate works exactly as without it: every call has a short timeout and a
  * failure only costs our read.
@@ -19,6 +23,7 @@ const plates = require('./plates');
 
 const OWN_PREFIX = 'own_';
 const RECENT_MS = 15 * 60e3;
+const TWIN_MS = 15e3;
 
 class OwnReader {
   /**
@@ -38,11 +43,12 @@ class OwnReader {
     this.after = null; // last pass seq taken from the reader; null: not asked yet (skip what it saw before we started)
     this.boot = null;  // the reader's id for its current run: a new one means it restarted
     this.held = [];
+    this.recent = []; // passes taken in the last minutes, held or handled: the neighbours a misread is judged by
     this.timer = null;
     this.stopped = false;
     this.lastOk = null;
     this.lastError = null;
-    this.stats = { passes: 0, used: 0, cameraHad: 0, rereads: 0, rereadUsed: 0 };
+    this.stats = { passes: 0, used: 0, cameraHad: 0, misread: 0, rereads: 0, rereadUsed: 0 };
   }
 
   start() {
@@ -85,11 +91,34 @@ class OwnReader {
       // (own_<channel>_<ms>) and the tracker skips it. Older ones are not news any more.
       this.boot = r.boot;
       this.after = r.seq;
-      this.held.push(...r.passes.filter((p) => Date.now() - p.time < RECENT_MS));
+      this._take(r.passes.filter((p) => Date.now() - p.time < RECENT_MS));
       return;
     }
     this.after = r.seq;
-    this.held.push(...r.passes);
+    this._take(r.passes);
+  }
+
+  _take(passes) {
+    this.held.push(...passes);
+    const since = Date.now() - RECENT_MS;
+    this.recent = this.recent.filter((p) => p.time >= since);
+    this.recent.push(...passes);
+  }
+
+  /**
+   * The plate this read is a misread of, or null: a similar plate on the same camera within TWIN_MS that was read in
+   * more frames or belongs to the fleet, when this one doesn't.
+   */
+  misreadOf(p, plate) {
+    const fleet = new Set(this.gate.fleetPlates());
+    if (fleet.has(plate)) return null;
+    for (const q of this.recent) {
+      if (q === p || q.channel !== p.channel || Math.abs(q.time - p.time) > TWIN_MS || q.conf < this.minConf) continue;
+      const other = plates.normalize(q.plate);
+      if (!other || other === plate || !plates.isValid(other) || plates.distance(plate, other) > 2) continue;
+      if (fleet.has(other) || q.votes > p.votes) return other;
+    }
+    return null;
   }
 
   /** Passes held long enough: the camera's capture had its chance. */
@@ -115,6 +144,12 @@ class OwnReader {
     }
     const plate = plates.normalize(p.plate);
     if (!plate || !plates.isValid(plate) || p.conf < this.minConf) return;
+    const twin = this.misreadOf(p, plate);
+    if (twin) {
+      this.stats.misread++;
+      this.log.info?.(`own reader: ${cam.name} ${plate} (${p.votes} frames) dropped, a misread of ${twin} in the same seconds`);
+      return;
+    }
     const cap = {
       name: `${OWN_PREFIX}${p.channel}_${p.time}`, channel: p.channel, time: p.time, plate,
       own: { conf: p.conf, votes: p.votes, jpeg: Buffer.from(p.jpeg, 'base64') },
