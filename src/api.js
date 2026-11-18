@@ -498,7 +498,7 @@ function buildApi(ctx) {
       counts: { positions: count('positions'), gateEvents: count('gate_events'), alerts: count('alerts'), users: count('users'), pushSubscriptions: count('push_subscriptions'), daysOfStats: h.get('SELECT COUNT(DISTINCT day) n FROM daily_stats').n },
       push: { sent: push.sent, failed: push.failed },
       telegram: ctx.telegram ? ctx.telegram.summary() : null,
-      topViews: gate?.topView ? gate.topViewStats() : null,
+      topViews: gate?.topView ? { ...gate.topViewStats(), ...gate.topView.health?.() } : null,
       dbBytes: (() => { try { return fs.statSync(require('node:path').join(config.dataDir, 'dispatcher.db')).size; } catch { return null; } })(),
       config: { yard: config.yard, cameras: config.nvr.cameras, offlineMinutes: config.gps.offlineMinutes, longStopMinutes: config.rules.longStopMin, workHours: config.rules.workHours },
       uptimeS: Math.round(process.uptime()),

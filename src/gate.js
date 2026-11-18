@@ -30,7 +30,14 @@ let sharp = null;
 try { sharp = require('sharp'); } catch { /* optional: photos are stored full size without it */ }
 
 const LEARN_HITS = 3;
-const FRESH_MS = 2 * 60e3; // the overview snapshot only shows the vehicle for a minute or two
+const FRESH_MS = 2 * 60e3; // a capture this recent is live news: its photos are fetched
+// A live snapshot of the overview camera only shows the vehicle for a few seconds. On 18 Nov 2026 every event came from
+// our reader 45 s to 3 min after the pass, and its snapshot showed an empty lane. The top view finds the moment instead.
+const SNAPSHOT_MS = 10e3;
+const LIVE_LAG_MS = 5e3; // the live frames of a window's last seconds arrive a moment later
+// A pass read from behind (src/cameras/ownreader.js) comes from the camera the vehicle drove away from, after it passed
+// its own camera: 13-16 s after, for 10861HDA on 18 Nov 2026 (ANPR-1 14:15:49, read from behind on ANPR-2 14:16:02-07).
+const REAR_LAG_S = 16;
 const NOTIFY_MAX_AGE_MS = 15 * 60e3; // older (catch-up after downtime) events are recorded, not pushed
 const HISTORY_DONE = 'camera_history_done'; // kv: when the first-run camera import succeeded
 const PLAYABLE_WAIT_MS = 4 * 60e3; // the NVR makes a recording playable within 2 min; past this give up waiting
@@ -234,8 +241,9 @@ class Gate {
     };
     // Our reader's captures bring the frame it read; a re-read capture already has the camera's picture.
     try { await save(d.camera.name, cap.own?.jpeg || cap.picture || await this.nvr.captureImage(cap), 1); } catch (e) { this.log.warn?.(`capture image: ${e.message}`); }
-    if (d.camera.contextChannel && Date.now() - cap.time <= FRESH_MS) {
-      try { await save(d.camera.contextName || `ch${d.camera.contextChannel}`, await this.nvr.snapshot(d.camera.contextChannel), 2); } catch (e) { this.log.warn?.(`snapshot: ${e.message}`); }
+    const over = this.overviewFor(cap.channel, d.direction);
+    if (over?.contextChannel && Date.now() - cap.time <= SNAPSHOT_MS) {
+      try { await save(over.contextName || `ch${over.contextChannel}`, await this.nvr.snapshot(over.contextChannel), 2); } catch (e) { this.log.warn?.(`snapshot: ${e.message}`); }
     }
     // On a slow line the top view can be there first: it stays, and takes the snapshot's place.
     const now = JSON.parse(this.h.get('SELECT photos FROM gate_events WHERE id = ?', id).photos || '[]').filter((p) => p.v);
@@ -368,12 +376,12 @@ class Gate {
     for (const row of rows) {
       if (started >= free) break;
       if (this.topRunning.has(row.id) || (this.topNext.get(row.id) || 0) > now) continue;
-      const cam = this.cameras.get(row.channel);
+      const cam = this.overviewFor(row.channel, row.direction);
       if (row.status === 'vetoed' || !cam?.topView || !cam.contextChannel) {
         this.h.run("UPDATE gate_events SET top_view = NULL WHERE id = ?", row.id);
         continue;
       }
-      if (now < row.t + cam.topView.to * 1000) continue; // it isn't over yet
+      if (now < row.t + cam.topView.to * 1000 + LIVE_LAG_MS) continue; // it isn't over yet
       started++;
       const job = this.runTopView(row, cam)
         .catch((e) => this.log.warn?.(`top view ${row.id}: ${e.message}`))
@@ -382,9 +390,23 @@ class Gate {
     }
   }
 
+  /**
+   * The camera whose overview shows this pass: the one for the way the vehicle went. A pass read from behind is on the
+   * other camera: the vehicle passed this camera's overview before that read, up to REAR_LAG_S earlier.
+   */
+  overviewFor(channel, direction) {
+    const cam = this.cameras.get(channel);
+    if (!cam || cam.direction === direction) return cam;
+    const own = [...this.cameras.values()].find((c) => c.direction === direction && c.contextChannel);
+    if (!own) return cam;
+    const tv = own.topView;
+    return tv ? { ...own, topView: { ...tv, from: tv.from - REAR_LAG_S, expect: (tv.expect || 0) - REAR_LAG_S / 2 } } : own;
+  }
+
   async runTopView(row, cam) {
     const end = row.t + cam.topView.to * 1000;
-    if (!await this.topView.ready(cam.contextChannel, end)) {
+    const live = this.topView.covers?.(cam.contextChannel, row.t + cam.topView.from * 1000, end);
+    if (!live && !await this.topView.ready(cam.contextChannel, end)) {
       if (Date.now() - end < PLAYABLE_WAIT_MS) {
         this.topNext.set(row.id, Date.now() + PLAYABLE_POLL_MS);
         return;
@@ -408,10 +430,10 @@ class Gate {
       return this.topViewDone(row.id, 'failed', note);
     }
     if (!shot.jpeg) {
-      this.log.info?.(`top view ch${cam.contextChannel} of event ${row.id}: no vehicle in ${shot.frames} frames`);
+      this.log.info?.(`top view ch${cam.contextChannel} of event ${row.id}${shot.source === 'live' ? ' (live)' : ''}: no vehicle in ${shot.frames} frames`);
       return this.topViewDone(row.id, 'none');
     }
-    this.log.info?.(`top view ch${cam.contextChannel} of event ${row.id}: vehicle at ${shot.t >= 0 ? '+' : ''}${Math.round(shot.t)} s, ${Math.round(shot.share * 100)}% of the lane, ${shot.passes} pass(es) in ${shot.frames} frames`);
+    this.log.info?.(`top view ch${cam.contextChannel} of event ${row.id}${shot.source === 'live' ? ' (live)' : ''}: vehicle at ${shot.t >= 0 ? '+' : ''}${Math.round(shot.t)} s, ${Math.round(shot.share * 100)}% of the lane, ${shot.passes} pass(es) in ${shot.frames} frames`);
     await this.saveTopView(row, cam, shot.jpeg);
     this.topViewDone(row.id, 'done');
   }

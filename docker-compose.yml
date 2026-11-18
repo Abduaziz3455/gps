@@ -17,7 +17,9 @@ services:
     dns:                             # this machine's own resolver (Tailscale) takes 560 ms an answer, these 60 ms
       - 1.1.1.1
       - 8.8.8.8
-    mem_limit: 512m                  # includes up to 2 ffmpeg reading top views: 167 MB together (measured 5 Nov 2026)
+    mem_limit: 900m                  # includes up to 2 ffmpeg reading top views from recordings (167 MB together, 5 Nov 2026)
+                                     # and the overview cameras' live frames: 2 ffmpeg of 100 MB and 5 minutes of key frames,
+                                     # about 90 MB (18 Nov 2026). Usual use was 150 MB before the live frames
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]
       interval: 30s

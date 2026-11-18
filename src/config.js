@@ -88,6 +88,7 @@ const config = {
     keepPhotosDays: num(env.KEEP_PHOTOS_DAYS, 90),
     rtspPort: num(env.NVR_RTSP_PORT, 554),
     topViewEnabled: bool(env.TOP_VIEW, true),
+    topViewLive: bool(env.TOP_VIEW_LIVE, true), // keep the overview cameras' last minutes of live video for the top view
     topViewWorkers: num(env.TOP_VIEW_WORKERS, 2),
     ffmpeg: env.FFMPEG_PATH || 'ffmpeg',
     ffprobe: env.FFPROBE_PATH || 'ffprobe',

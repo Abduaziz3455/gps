@@ -65,7 +65,10 @@ function build() {
       nvr = new NVR({ host: config.nvr.host, user: config.nvr.user, password: config.nvr.password, tzOffsetMin: config.tzOffsetMin });
       if (config.nvr.topViewEnabled) {
         const { TopView } = require('./src/cameras/topview');
-        topView = new TopView({ host: config.nvr.host, user: config.nvr.user, password: config.nvr.password, rtspPort: config.nvr.rtspPort, tzOffsetMin: config.tzOffsetMin, ffmpeg: config.nvr.ffmpeg, ffprobe: config.nvr.ffprobe, log });
+        // The overview cameras' live frames are kept from the start (src/cameras/topview.js, LiveFrames).
+        const liveChannels = config.nvr.topViewLive ? [...new Set(config.nvr.cameras.filter((c) => c.topView && c.contextChannel).map((c) => c.contextChannel))] : [];
+        topView = new TopView({ host: config.nvr.host, user: config.nvr.user, password: config.nvr.password, rtspPort: config.nvr.rtspPort, tzOffsetMin: config.tzOffsetMin, ffmpeg: config.nvr.ffmpeg, ffprobe: config.nvr.ffprobe, log, liveChannels });
+        topView.start();
       }
     } else log.warn('NVR_HOST / NVR_PASSWORD not set: gate cameras are off');
   }

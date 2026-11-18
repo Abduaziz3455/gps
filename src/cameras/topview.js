@@ -22,6 +22,18 @@
  *
  * ffmpeg runs as its own process, so decoding can't hurt the server: it is limited by the worker count, and if it
  * crashes or hangs only this one picture is lost.
+ *
+ * Live frames (LiveFrames, since 18 Nov 2026): the app also keeps the last minutes of each overview camera's live video,
+ * key frames only, and finds the vehicle there first. The recording is the fallback, for a window the live frames don't
+ * cover (the app just started, or the live video broke off). Two reasons:
+ *  - After the plant lost its connection on 17 Nov 2026, the NVR stopped recording ch5 and ch6. Every top view failed,
+ *    and the events kept a live snapshot taken when they reached the app.
+ *  - Most passes now come from our reader, 45 s to 3.5 min after the vehicle went by. A snapshot taken then shows an
+ *    empty lane. The live frames hold the moment itself, and the picture is there without waiting the 2 minutes the NVR
+ *    takes to make a recording playable.
+ * Measured on production on 18 Nov 2026: one ffmpeg per camera reading the main stream's key frames (one every 2 s, as in
+ * the recordings) takes 8% of a core and about 100 MB. A key frame is 220-350 KB as a 1280 px JPEG, so 5 minutes of two
+ * cameras hold about 90 MB.
  */
 const { spawn } = require('node:child_process');
 
@@ -37,6 +49,9 @@ const FORWARD_MIN = 4;                 // pixels (of 160 x 90) of movement that 
 const MIN_READ = 0.7;                  // less than this share of the expected key frames: the NVR cut the stream short
 const TOLERANCE_S = 7;                 // a pass this close to the expected moment may be ours; the biggest of them wins
 const SOCKET_TIMEOUT_US = 20_000_000;  // the NVR stopped answering
+const LIVE_KEEP_S = 300;               // live frames kept: our reader's passes reach the app up to 3.5 min after the vehicle
+const LIVE_RETRY_S = [5, 15, 60];      // waits before reading the live video again after it broke off
+const LIVE_STEADY_S = 60;              // a run this long was fine: the next break starts the waits again
 const JPEG_START = Buffer.from([0xff, 0xd8]);
 const JPEG_END = Buffer.from([0xff, 0xd9]);
 
@@ -150,6 +165,137 @@ function splitJpegs(buf) {
   return out;
 }
 
+/** The complete JPEGs at the start of a growing stream, and what is left of the next one. */
+function takeJpegs(buf) {
+  const pics = splitJpegs(buf);
+  const used = pics.length ? pics[pics.length - 1].byteOffset - buf.byteOffset + pics[pics.length - 1].length : 0;
+  return { pics: pics.map((p) => Buffer.from(p)), rest: Buffer.from(buf.subarray(used)) };
+}
+
+/** ffmpeg arguments: key frames only, as small RGB frames on pipe 3 and 1280 px JPEGs on pipe 4. */
+function frameArgs(args, url, seconds) {
+  const filter = `[0:v]split=2[a][b];[a]scale=${W}:${H},format=rgb24[s];[b]scale=${OUT_WIDTH}:-2[l]`;
+  return ['-nostdin', '-v', 'error', ...args, '-skip_frame', 'nokey', '-threads', '1', ...(seconds ? ['-t', String(seconds)] : []), '-i', url,
+    '-an', '-filter_complex', filter,
+    // Each picture is written out at once: ffmpeg otherwise holds back up to 32 KB, and a live frame would arrive late.
+    '-map', '[s]', '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-flush_packets', '1', 'pipe:3',
+    '-map', '[l]', '-fps_mode', 'passthrough', '-c:v', 'mjpeg', '-q:v', '3', '-f', 'image2pipe', '-flush_packets', '1', 'pipe:4'];
+}
+
+/**
+ * The last minutes of the overview cameras' live video, key frames only, each with the time it arrived.
+ * One ffmpeg per camera, read again after a break (LIVE_RETRY_S).
+ */
+class LiveFrames {
+  /**
+   * @param {{channels: number[], source: (channel: number) => {url: string, args?: string[]}, ffmpeg?: string,
+   *   keepS?: number, log?: object, spawn?: typeof spawn, now?: () => number}} o
+   */
+  constructor({ channels, source, ffmpeg = 'ffmpeg', keepS = LIVE_KEEP_S, log = console, spawn: sp = spawn, now = Date.now }) {
+    this.source = source;
+    this.ffmpeg = ffmpeg;
+    this.keepMs = keepS * 1000;
+    this.log = log;
+    this.spawn = sp;
+    this.now = now;
+    this.stopped = false;
+    this.cams = new Map(channels.map((ch) => [ch, { channel: ch, frames: [], proc: null, timer: null, fails: 0, restarts: 0, error: null, since: null }]));
+  }
+
+  start() {
+    for (const c of this.cams.values()) this._run(c);
+  }
+
+  stop() {
+    this.stopped = true;
+    for (const c of this.cams.values()) { clearTimeout(c.timer); c.proc?.kill('SIGKILL'); }
+  }
+
+  _run(c) {
+    if (this.stopped) return;
+    const { url, args = [] } = this.source(c.channel);
+    const p = this.spawn(this.ffmpeg, frameArgs(args, url), { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
+    c.proc = p;
+    c.since = this.now();
+    c.raw = Buffer.alloc(0);
+    c.jpeg = Buffer.alloc(0);
+    c.smalls = [];
+    c.pics = [];
+    let err = '';
+    p.stderr.on('data', (d) => { err = (err + d).slice(-2000); });
+    p.stdio[3].on('data', (d) => this._raw(c, d));
+    p.stdio[4].on('data', (d) => this._pics(c, d));
+    const ended = (why) => {
+      if (c.proc !== p) return;
+      c.proc = null;
+      if (this.stopped) return;
+      if (this.now() - c.since >= LIVE_STEADY_S * 1000) c.fails = 0;
+      const msg = why || TopView.clean(err) || 'the stream ended';
+      if (msg !== c.error || c.fails === 0) this.log.warn?.(`live frames ch${c.channel}: ${msg}`);
+      c.error = msg;
+      const wait = LIVE_RETRY_S[Math.min(c.fails, LIVE_RETRY_S.length - 1)];
+      c.fails++;
+      c.restarts++;
+      c.timer = setTimeout(() => this._run(c), wait * 1000);
+    };
+    p.once('error', (e) => ended(e.code === 'ENOENT' ? 'ffmpeg is not installed' : e.code || 'ffmpeg failed'));
+    p.once('close', (code, signal) => ended(signal ? `ffmpeg stopped (${signal})` : null));
+  }
+
+  /** Small frames, in fixed sizes: each is timed when it is complete. */
+  _raw(c, d) {
+    const size = W * H * CH;
+    c.raw = c.raw.length ? Buffer.concat([c.raw, d]) : d;
+    while (c.raw.length >= size) {
+      c.smalls.push({ at: this.now(), small: new Uint8Array(c.raw.subarray(0, size)) });
+      c.raw = c.raw.subarray(size);
+    }
+    this._pair(c);
+  }
+
+  _pics(c, d) {
+    const { pics, rest } = takeJpegs(c.jpeg.length ? Buffer.concat([c.jpeg, d]) : d);
+    c.jpeg = rest;
+    c.pics.push(...pics);
+    this._pair(c);
+  }
+
+  /** ffmpeg writes both pictures of a key frame in turn: the n-th small frame goes with the n-th JPEG. */
+  _pair(c) {
+    while (c.smalls.length && c.pics.length) {
+      const s = c.smalls.shift();
+      c.frames.push({ at: s.at, small: s.small, jpeg: c.pics.shift() });
+      if (c.error) { this.log.info?.(`live frames ch${c.channel}: back`); c.error = null; }
+    }
+    const old = this.now() - this.keepMs;
+    while (c.frames.length && c.frames[0].at < old) c.frames.shift();
+  }
+
+  /**
+   * The frames of this stretch, or null when the live frames don't cover it: it is older than what is kept, still
+   * coming, or has a gap (the live video broke off meanwhile).
+   * @returns {{at: number, small: Uint8Array, jpeg: Buffer}[] | null}
+   */
+  window(channel, fromMs, toMs) {
+    const c = this.cams.get(channel);
+    if (!c?.frames.length) return null;
+    const step = KEY_INTERVAL_S * 1000 * 1.5;
+    const all = c.frames;
+    if (all[0].at > fromMs + step || all[all.length - 1].at < toMs - step) return null;
+    const out = all.filter((f) => f.at >= fromMs && f.at <= toMs);
+    for (let i = 1; i < out.length; i++) if (out[i].at - out[i - 1].at > 3 * step) return null;
+    return out.length >= MIN_READ * ((toMs - fromMs) / 1000 / KEY_INTERVAL_S) ? out : null;
+  }
+
+  health() {
+    return [...this.cams.values()].map((c) => ({
+      channel: c.channel, running: !!c.proc, frames: c.frames.length,
+      seconds: c.frames.length ? Math.round((c.frames[c.frames.length - 1].at - c.frames[0].at) / 1000) : 0,
+      restarts: c.restarts, error: c.error,
+    }));
+  }
+}
+
 /** Local "YYYYMMDDTHHMMSSZ": the NVR stores local time and labels it Z (see hikvision.js). */
 const nvrTime = (ms, tzOffsetMin) => new Date(ms + tzOffsetMin * 60e3).toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z';
 
@@ -159,7 +305,8 @@ class TopView {
    *   ffmpeg?: string, ffprobe?: string, log?: object, source?: (channel: number, startMs: number) => {url: string, args?: string[]}}} o
    *   source: where the recording comes from (tests read a local video file).
    */
-  constructor({ host, user, password, rtspPort = 554, tzOffsetMin = 300, ffmpeg = 'ffmpeg', ffprobe = 'ffprobe', log = console, source }) {
+  constructor({ host, user, password, rtspPort = 554, tzOffsetMin = 300, ffmpeg = 'ffmpeg', ffprobe = 'ffprobe', log = console, source,
+    liveChannels = [], liveSource, liveKeepS }) {
     this.ffmpeg = ffmpeg;
     this.ffprobe = ffprobe;
     this.log = log;
@@ -170,7 +317,18 @@ class TopView {
       url: `rtsp://${auth}@${hostname}:${rtspPort}/Streaming/tracks/${channel}01?starttime=${nvrTime(startMs, tzOffsetMin)}`, args: rtsp,
     }));
     this.running = new Set();
+    // The main stream: the sub-stream's 640 px picture is too small to tell sand from an empty bed.
+    this.live = liveChannels.length ? new LiveFrames({
+      channels: liveChannels, ffmpeg, log, keepS: liveKeepS,
+      source: liveSource || ((channel) => ({ url: `rtsp://${auth}@${hostname}:${rtspPort}/Streaming/channels/${channel}01`, args: rtsp })),
+    }) : null;
   }
+
+  /** Start keeping the live frames. */
+  start() { this.live?.start(); }
+
+  /** Do the live frames hold this whole stretch? Then grab() needs no recording. */
+  covers(channel, fromMs, toMs) { return !!this.live?.window(channel, fromMs, toMs); }
 
   /** ffmpeg's message without the address and password that are in the URL. */
   static clean(text) {
@@ -201,11 +359,7 @@ class TopView {
    */
   scan(channel, startMs, seconds) {
     const { url, args = [] } = this.source(channel, startMs);
-    const filter = `[0:v]split=2[a][b];[a]scale=${W}:${H},format=rgb24[s];[b]scale=${OUT_WIDTH}:-2[l]`;
-    const argv = ['-nostdin', '-v', 'error', ...args, '-skip_frame', 'nokey', '-threads', '1', '-t', String(seconds), '-i', url,
-      '-an', '-filter_complex', filter,
-      '-map', '[s]', '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:3',
-      '-map', '[l]', '-fps_mode', 'passthrough', '-c:v', 'mjpeg', '-q:v', '3', '-f', 'image2pipe', 'pipe:4'];
+    const argv = frameArgs(args, url, seconds);
     return new Promise((resolve, reject) => {
       const p = this._spawn(this.ffmpeg, argv, ['ignore', 'ignore', 'pipe', 'pipe', 'pipe']);
       const small = [], jpegs = [];
@@ -233,15 +387,23 @@ class TopView {
    * The picture of the vehicle at a capture.
    * @param {{contextChannel: number, topView: {from: number, to: number, expect: number, lane?: number[][]}}} cam
    * @param {{final?: boolean}} [o]  final: the last try; a short read is used as it is instead of failing
-   * @returns {Promise<{jpeg: Buffer, share: number, t: number, frames: number, passes: number} | {jpeg: null, frames: number, passes: 0}>}
+   * @returns {Promise<{jpeg: Buffer, share: number, t: number, frames: number, passes: number, source: string} | {jpeg: null, frames: number, passes: 0, source: string}>}
+   *   source: 'live' (the live frames held it) or 'recording'
    */
   async grab(cam, captureMs, { final = true } = {}) {
     const { from, to, expect = 0, lane } = cam.topView;
-    const frames = (await this.scan(cam.contextChannel, captureMs + from * 1000, to - from)).map((f) => ({ ...f, t: f.t + from }));
-    if (!final && frames.length < MIN_READ * ((to - from) / KEY_INTERVAL_S)) throw new Error(`short read: ${frames.length} frames`);
+    const live = this.live?.window(cam.contextChannel, captureMs + from * 1000, captureMs + to * 1000);
+    let frames;
+    if (live) {
+      frames = live.map((f) => ({ ...f, t: (f.at - captureMs) / 1000 }));
+    } else {
+      frames = (await this.scan(cam.contextChannel, captureMs + from * 1000, to - from)).map((f) => ({ ...f, t: f.t + from }));
+      if (!final && frames.length < MIN_READ * ((to - from) / KEY_INTERVAL_S)) throw new Error(`short read: ${frames.length} frames`);
+    }
+    const source = live ? 'live' : 'recording';
     const found = findVehicle(frames, { mask: laneMask(lane), expect });
-    if (found.index === null) return { jpeg: null, frames: frames.length, passes: 0 };
-    return { jpeg: frames[found.index].jpeg, share: found.share, t: found.t, frames: frames.length, passes: found.passes };
+    if (found.index === null) return { jpeg: null, frames: frames.length, passes: 0, source };
+    return { jpeg: frames[found.index].jpeg, share: found.share, t: found.t, frames: frames.length, passes: found.passes, source };
   }
 
   /** The end of the stretch grab() reads. */
@@ -249,8 +411,11 @@ class TopView {
 
   /** Stop whatever is running (shutdown). */
   stop() {
+    this.live?.stop();
     for (const p of this.running) p.kill('SIGKILL');
   }
+
+  health() { return this.live ? { live: this.live.health() } : {}; }
 }
 
-module.exports = { TopView, findVehicle, laneMask, medianBackground, compare, splitJpegs, W, H, CH, MIN_SHARE };
+module.exports = { TopView, LiveFrames, findVehicle, laneMask, medianBackground, compare, splitJpegs, takeJpegs, W, H, CH, MIN_SHARE };

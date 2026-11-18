@@ -93,8 +93,23 @@ about one entry in four it sent an empty lane, a truck still far away, or the ne
 | Key frames every 2 s; the recording is served in real time, only the main stream is recorded | Key frames only: a fifth of the CPU of a full decode. Two reads at once peak at 167 MB in the production image |
 | The NVR makes a recording playable in 2-minute steps, answering 400 before that | Asks every 15 s, up to 4 minutes past the end of the window |
 
+**Live frames (18 Nov 2026).** The app also keeps the last 5 minutes of both overview cameras' live video, key frames only,
+and looks for the vehicle there first. The recording is the fallback, for a window the live frames don't hold (the app just
+started, or the live video broke off).
+
+| What happened | What the code does |
+|---|---|
+| After the plant lost its connection on 17 Nov, the NVR stopped recording ch5 and ch6. Every top view failed | The live frames don't need the NVR to record. Switch off with `TOP_VIEW_LIVE=0` |
+| Most passes come from our reader, 45 s to 3.5 min after the vehicle. The live snapshot taken then showed an empty lane | A live snapshot is attached only to a pass at most 10 s old. Otherwise the top view is the only overview picture |
+| The picture waited for the NVR to make the recording playable (2 min) | From the live frames it is ready 5 s after the window ends |
+| A vehicle read from behind (an entry on ANPR-2) took ANPR-2's overview, Yo'l-1, with exit timing | The overview is chosen by the way the vehicle went: an entry uses Yo'l-2. The window starts 16 s earlier, because the rear read came 13-16 s after the vehicle passed ANPR-1 |
+
+Cost, measured on production: one ffmpeg per camera, 8% of a core and about 100 MB each. Key frames are 220-350 KB as
+1280 px JPEGs, so 5 minutes of two cameras hold about 90 MB. The app's memory limit went from 512 MB to 900 MB. `/health`
+shows each camera's frames, seconds held, restarts and last error under `topViews.live`.
+
 ffmpeg runs as its own process: if it crashes or hangs, one picture is lost, not the server. At most `TOP_VIEW_WORKERS` (2) read
-at once. Each event's state is in `gate_events.top_view`, so a restart carries on, and a failing camera shows up in system health.
+recordings at once. Each event's state is in `gate_events.top_view`, so a restart carries on, and a failing camera shows up in system health.
 
 ## 3. Server modules
 

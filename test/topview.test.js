@@ -7,7 +7,9 @@ const { spawnSync, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { TopView, findVehicle, laneMask, splitJpegs, W, H, CH } = require('../src/cameras/topview');
+const { EventEmitter } = require('node:events');
+const { PassThrough } = require('node:stream');
+const { TopView, LiveFrames, findVehicle, laneMask, splitJpegs, takeJpegs, W, H, CH } = require('../src/cameras/topview');
 
 const GREY = [120, 120, 118];
 /** A frame: grey road, with `blocks` of colour: {x, y, w, h, c}. */
@@ -116,4 +118,123 @@ test('no ffmpeg on the machine: a clear error, not a crash', async () => {
   const tv = new TopView({ ffmpeg: '/nonexistent/ffmpeg', ffprobe: '/nonexistent/ffprobe', source: () => ({ url: 'x' }) });
   assert.equal(await tv.ready(5, 0), false);
   await assert.rejects(tv.scan(5, 0, 4), /not installed/);
+});
+
+// --- live frames ---------------------------------------------------------------------------------
+
+/** A stand-in for ffmpeg: what the test writes to its pipes is what LiveFrames reads. */
+function fakeSpawn() {
+  const procs = [];
+  const sp = () => {
+    const p = new EventEmitter();
+    p.stderr = new PassThrough();
+    p.stdio = [null, null, p.stderr, new PassThrough(), new PassThrough()];
+    p.kill = () => p.emit('close', null, 'SIGKILL');
+    procs.push(p);
+    return p;
+  };
+  return { sp, procs };
+}
+const jpeg = (n) => Buffer.from([0xff, 0xd8, n, n, 0xff, 0xd9]);
+
+test('live frames: each key frame keeps its time, and a window is served only when it is all there', () => {
+  const { sp, procs } = fakeSpawn();
+  let now = 1_000_000;
+  const live = new LiveFrames({ channels: [5], source: () => ({ url: 'x' }), spawn: sp, now: () => now, keepS: 60, log: {} });
+  live.start();
+  const [p] = procs;
+  for (let i = 0; i < 20; i++) { // 40 s, a key frame every 2 s; the pipes deliver in pieces
+    const small = Buffer.alloc(W * H * CH, i);
+    p.stdio[3].emit('data', small.subarray(0, 1000));
+    p.stdio[3].emit('data', small.subarray(1000));
+    const j = jpeg(i);
+    p.stdio[4].emit('data', j.subarray(0, 3));
+    p.stdio[4].emit('data', j.subarray(3));
+    now += 2000;
+  }
+  const t0 = 1_000_000;
+  const w = live.window(5, t0 + 10e3, t0 + 20e3);
+  assert.deepEqual(w.map((f) => f.at - t0), [10e3, 12e3, 14e3, 16e3, 18e3, 20e3]);
+  assert.equal(w[0].jpeg[2], 5, 'the n-th JPEG goes with the n-th small frame');
+  assert.equal(w[0].small[0], 5);
+  assert.equal(live.window(5, t0 + 30e3, t0 + 50e3), null, 'still coming');
+  assert.equal(live.window(5, t0 - 20e3, t0 + 10e3), null, 'older than what is kept');
+  assert.equal(live.window(6, t0, t0 + 10e3), null, 'not a live channel');
+  now += 120e3; // the next frame arrives two minutes later: what is older than a minute is let go
+  p.stdio[3].emit('data', Buffer.alloc(W * H * CH));
+  p.stdio[4].emit('data', jpeg(99));
+  assert.equal(live.health()[0].frames, 1);
+  live.stop();
+});
+
+test('live frames: a gap in the middle is not covered', () => {
+  const { sp, procs } = fakeSpawn();
+  let now = 0;
+  const live = new LiveFrames({ channels: [5], source: () => ({ url: 'x' }), spawn: sp, now: () => now, log: {} });
+  live.start();
+  for (const at of [0, 2, 4, 6, 20, 22, 24, 26]) {
+    now = at * 1000;
+    procs[0].stdio[3].emit('data', Buffer.alloc(W * H * CH));
+    procs[0].stdio[4].emit('data', jpeg(at));
+  }
+  assert.equal(live.window(5, 0, 26e3), null);
+  assert.ok(live.window(5, 20e3, 26e3));
+  live.stop();
+});
+
+test('live frames: a stream that breaks off is read again', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { sp, procs } = fakeSpawn();
+  const warned = [];
+  const live = new LiveFrames({ channels: [5, 6], source: () => ({ url: 'x' }), spawn: sp, log: { warn: (m) => warned.push(m), info() {} } });
+  live.start();
+  assert.equal(procs.length, 2);
+  procs[0].stderr.emit('data', 'rtsp://admin:pw@10.0.0.1:554/x: Connection refused');
+  procs[0].emit('close', 1, null);
+  assert.equal(live.health()[0].running, false);
+  assert.ok(!/pw|10\.0/.test(warned[0]), warned[0]);
+  t.mock.timers.tick(5000);
+  assert.equal(procs.length, 3, 'started again');
+  live.stop();
+  procs[2].emit('close', null, 'SIGKILL');
+  t.mock.timers.tick(60e3);
+  assert.equal(procs.length, 3, 'not after stop');
+});
+
+test('JPEGs split across pieces of a stream are kept whole', () => {
+  const { pics, rest } = takeJpegs(Buffer.concat([jpeg(1), jpeg(2), jpeg(3).subarray(0, 4)]));
+  assert.deepEqual(pics.map((p) => p[2]), [1, 2]);
+  assert.equal(rest.length, 4);
+});
+
+test('grab: the live frames are used when they hold the window, the recording otherwise', async () => {
+  const tv = new TopView({ source: () => { throw new Error('no recording'); } });
+  const t0 = 5_000_000;
+  const frames = [0, 0, 0, 1, 0, 0, 0, 0].map((v, i) => ({ at: t0 - 4000 + i * 2000, small: v ? truck(40, 30) : empty(), jpeg: jpeg(i) }));
+  tv.live = { window: (ch, from, to) => frames.filter((f) => f.at >= from && f.at <= to), stop() {} };
+  const shot = await tv.grab({ contextChannel: 5, topView: { from: -4, to: 10, expect: 1 } }, t0);
+  assert.equal(shot.source, 'live');
+  assert.equal(shot.t, 2);
+  assert.equal(shot.jpeg[2], 3);
+  assert.equal(tv.covers(5, t0, t0 + 1), true);
+  tv.live = { window: () => null, stop() {} };
+  await assert.rejects(tv.grab({ contextChannel: 5, topView: { from: -4, to: 10, expect: 1 } }, t0), /no recording/);
+});
+
+test('ffmpeg: live frames from a stream', { skip: !hasFfmpeg && 'ffmpeg is not installed' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-'));
+  try {
+    const video = path.join(dir, 'lane.mp4');
+    execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=gray:s=640x360:r=10:d=6', '-c:v', 'libx264', '-bf', '0', '-g', '20', '-keyint_min', '20', '-sc_threshold', '0', '-pix_fmt', 'yuv420p', video]);
+    const live = new LiveFrames({ channels: [5], source: () => ({ url: video, args: ['-re'] }), log: {} });
+    const t0 = Date.now();
+    live.start();
+    await new Promise((resolve) => { const iv = setInterval(() => { if (!live.health()[0].running && live.cams.get(5).frames.length) { clearInterval(iv); resolve(); } }, 100); });
+    live.stop();
+    const got = live.window(5, t0, Date.now());
+    assert.equal(got.length, 3, 'three key frames in 6 s');
+    assert.equal(got[0].jpeg[0], 0xff);
+    assert.equal(got[0].small.length, W * H * CH);
+    assert.ok(got[2].at - got[0].at >= 3000, 'timed as they came, in real time');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

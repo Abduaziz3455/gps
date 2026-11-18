@@ -73,8 +73,8 @@ function rig(t, api, { chatIds = [], adminIds = ['100'], allVehicles = true, gps
     publicOrigin: 'https://tbb.example',
   };
   const cap = Buffer.from([0xff, 0xd8, 1, 0xff, 0xd9]);
-  const topView = { calls: 0, result: { jpeg: Buffer.from([0xff, 0xd8, 2, 0xff, 0xd9]), share: 0.3, t: 1, frames: 4, passes: 1 }, async ready() { return this.isReady !== false; }, async grab() { this.calls++; if (this.error) throw this.error; return this.result; }, stop() {} };
-  const nvr = { captureImage: async () => cap, snapshot: async () => cap };
+  const topView = { calls: 0, result: { jpeg: Buffer.from([0xff, 0xd8, 2, 0xff, 0xd9]), share: 0.3, t: 1, frames: 4, passes: 1 }, async ready() { return this.isReady !== false; }, async grab(cam) { this.calls++; this.cam = cam; if (this.error) throw this.error; return this.result; }, stop() {} };
+  const nvr = { snapshots: 0, captureImage: async () => cap, async snapshot() { this.snapshots++; return cap; } };
   const poller = { live: new Map(), openVisit: new Map() };
   let gate;
   const tracker = new Tracker(db, { fleetPlates: () => gate.fleetPlates() });
@@ -103,7 +103,7 @@ function rig(t, api, { chatIds = [], adminIds = ['100'], allVehicles = true, gps
     await Promise.all(gate.topRunning.values());
     gate.finalize(now);
   };
-  return { h, gate, config, outbox, telegram, topView, poller, capture, settle, dataDir };
+  return { h, gate, config, outbox, telegram, topView, nvr, tracker, poller, capture, settle, dataDir };
 }
 
 test('client: multipart body holds the fields and the file', () => {
@@ -204,6 +204,46 @@ test('an alert waits for its top view, and goes without it when none can be had'
   assert.equal(r.gate.get(ev.id).topView, 'none');
   await r.outbox.drain();
   assert.equal(api.sent('sendMediaGroup').length + api.sent('sendPhoto').length, 1);
+});
+
+test('a pass read from behind gets the top view of the way it went', async (t) => {
+  // 18 Nov 2026: 10861HDA went into the yard, read from behind on ANPR-2 (ch3) about 15 s after it passed ANPR-1.
+  const api = await fakeTelegram(t);
+  const r = rig(t, api);
+  const [in1, out2] = r.config.nvr.cameras;
+  const c = { channel: 3, time: Date.now() - 60e3, plate: '85450KBA', name: 'own_3_1' };
+  const d = r.tracker.process(c, { ...out2, direction: 'in' });
+  await r.gate.onDecision(d, 'live');
+  const ev = r.h.get('SELECT * FROM gate_events WHERE capture_name = ?', c.name);
+  assert.equal(ev.direction, 'in');
+  await r.settle();
+  assert.equal(r.topView.cam.contextChannel, in1.contextChannel, "the entry lane's overview, Yo'l-2");
+  assert.equal(r.topView.cam.topView.from, in1.topView.from - 16, 'looks further back');
+  assert.ok(r.topView.cam.topView.expect < in1.topView.expect);
+  assert.equal(r.gate.get(ev.id).photos.at(-1).name, "Yo'l-2");
+  assert.equal(r.gate.overviewFor(4, 'in'), in1, 'a pass read from the front: its own camera, unchanged');
+});
+
+test('top view from the live frames: no waiting for the recording', async (t) => {
+  const api = await fakeTelegram(t);
+  const r = rig(t, api);
+  const ev = await r.capture(4, Date.now() - 60e3, '85450KBA');
+  r.topView.isReady = false; // the NVR doesn't record the overview camera (17 Nov 2026)
+  r.topView.covers = () => true;
+  await r.settle();
+  assert.equal(r.gate.get(ev.id).topView, 'done');
+});
+
+test('a pass that reaches the app late gets no live snapshot: it would show an empty lane', async (t) => {
+  const api = await fakeTelegram(t);
+  const r = rig(t, api);
+  r.topView.result = { jpeg: null, frames: 18, passes: 0 };
+  const late = await r.capture(4, Date.now() - 45e3, '85450KBA'); // our reader's 45 s hold
+  assert.equal(r.nvr.snapshots, 0);
+  await r.settle();
+  assert.deepEqual(r.gate.get(late.id).photos.map((p) => p.name), ['ANPR-1']);
+  await r.capture(3, Date.now() - 2e3, '10964DDA');
+  assert.equal(r.nvr.snapshots, 1, 'a fresh one still gets it');
 });
 
 test('top view: a failure is tried again; a third failure lets the alert go', async (t) => {
