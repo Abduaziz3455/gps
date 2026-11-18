@@ -21,7 +21,7 @@ const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 /** A fake reader service: passes to hand out, and the answer to POST /read. */
 function fakeReader() {
   const r = { passes: [], seq: 0, boot: 'b1', readAnswer: [], down: false, reads: 0 };
-  r.add = (p) => { r.seq++; r.passes.push({ seq: r.seq, jpeg: JPEG.toString('base64'), votes: 5, frames: 12, others: {}, ...p }); };
+  r.add = (p) => { r.seq++; r.passes.push({ seq: r.seq, jpeg: JPEG.toString('base64'), votes: 5, frames: 12, others: {}, heading: 'toward', ...p }); };
   r.fetch = async (url, opts = {}) => {
     if (r.down) throw new Error('connect ECONNREFUSED');
     const u = new URL(url);
@@ -172,15 +172,45 @@ test("driving away alone decides nothing: a mixer reversing in front of ANPR-1 i
   await own.poll();
   const t = Date.now() - 50e3;
   reader.add({ channel: 4, time: t, plate: '85450KBA', conf: 0.99, votes: 9, heading: 'away' });
-  reader.add({ channel: 3, time: t + 5e3, plate: '85450KBA', conf: 0.99, votes: 3 }); // no heading: no say
+  reader.add({ channel: 3, time: t + 5e3, plate: '85450KBA', conf: 0.99, votes: 3, heading: null }); // no heading: no say
   await own.poll();
-  await own.release(t + 51e3);
-  assert.equal(events().length, 1, 'ANPR-2, no heading, goes on as before');
   await own.release(t + 100e3);
-  assert.equal(events().length, 1, 'ANPR-1 waits for a read of its front on ANPR-2');
+  assert.equal(events().length, 0, 'both wait: ANPR-1 for a read of its front on ANPR-2, ANPR-2 for any read that shows the way');
   await own.release(t + 121e3);
-  assert.deepEqual(events().map((e) => [e.camera, e.direction]), [['ANPR-2', 'out']],
-    'then goes through as the camera says, here a same-pass skip');
+  await own.release(t + 126e3);
+  assert.deepEqual(events().map((e) => [e.camera, e.direction]), [['ANPR-1', 'in']],
+    'then ANPR-1 goes through as the camera says, and the weak ANPR-2 read is the same pass');
+});
+
+test('a pass whose way is unknown waits for a read that shows it: 85304RAA going in, 18 Nov 2026', async () => {
+  const { own, reader, events } = setup();
+  await own.poll();
+  const t = Date.now() - 150e3;
+  // ANPR-2's live read: 2 frames, no way to tell. Event 2717 went out as an exit after the 45 s hold.
+  reader.add({ channel: 3, time: t + 1200, plate: '85304RAA', conf: 0.99, votes: 2, heading: null });
+  await own.poll();
+  await own.release(t + 60e3);
+  assert.equal(events().length, 0, 'waits');
+  // 1.5 min later the recording: ANPR-2 saw its back. A minute after that ANPR-1 its front.
+  reader.add({ channel: 3, time: t + 300, plate: '85304RAA', conf: 0.98, votes: 5, heading: 'away', source: 'recording' });
+  await own.poll();
+  await own.release(t + 111e3);
+  reader.add({ channel: 4, time: t, plate: '85304RAA', conf: 0.99, votes: 16, heading: 'toward', source: 'recording' });
+  await own.poll();
+  await own.release(t + 146e3);
+  assert.deepEqual(events().map((e) => [e.camera, e.direction]), [['ANPR-2', 'in']]);
+});
+
+test('a pass whose way stays unknown goes as its camera says after the wait', async () => {
+  const { own, reader, events } = setup();
+  await own.poll();
+  const t = Date.now() - 130e3;
+  reader.add({ channel: 3, time: t, plate: '85450KBA', conf: 0.99, votes: 2, heading: null });
+  await own.poll();
+  await own.release(t + 119e3);
+  assert.equal(events().length, 0);
+  await own.release(t + 121e3);
+  assert.deepEqual(events().map((e) => [e.camera, e.direction]), [['ANPR-2', 'out']]);
 });
 
 test('on ANPR-2 a vehicle driving away was seen from behind going into the yard: an entry, without waiting', async () => {

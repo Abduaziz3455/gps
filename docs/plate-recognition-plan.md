@@ -508,3 +508,16 @@ traffic.
 - **Watch:** the app log says `driving away, dropped: ANPR-n saw it coming` or `seen from behind: in`. `/health`
   counts these as `ownReader.away` and `ownReader.rear`. The reader's `pass chN …` log line ends with the heading. If
   a mixer is ever seen reversing away from ANPR-2, step 2 would log it as an entry: switch `awayIsRear` off.
+
+**Passes whose way is unknown (18 Nov 2026, afternoon).** Mixer 85304RAA went in at 15:40:49. ANPR-1 saw it coming and
+ANPR-2 saw it from behind, within a second, but both of those were reads from the recordings. They reached the app
+1.5 and 2.5 minutes later. ANPR-2's live read had 2 frames and no heading. It went through after the 45 s hold as an exit
+(event 2717), and the two good reads were skipped as "same pass". Event 2705 (85861HDA, 14:16, a misread of 10861HDA's
+rear plate) followed the same pattern. Now a pass with no heading waits, like an `away` pass on ANPR-1, up to 2 minutes
+for either of these:
+- the other camera's `toward` read of the same plate, which decides;
+- the same camera's read of the same plate within 15 s with a heading, normally from the recording. That read is handled
+  in the usual way, and the weak one is dropped.
+
+If neither comes, the pass goes as its camera says. The log says `way unknown, dropped` or `its read from the recording
+decides`. On 18 Nov, 4 of about 30 passes had no heading.
