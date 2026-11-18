@@ -42,7 +42,7 @@ Node's built-in `node:sqlite`.
 
 ### Two independent signals for the gate, cross-checked
 
-1. **Cameras**: the ANPR camera reads the plate; the camera decides the direction (ANPR-1 = in, ANPR-2 = out).
+1. **Cameras**: the ANPR camera reads the plate; the camera decides the direction (ANPR-1 = in, ANPR-2 = out). Our own reader also reads rear plates: when both cameras read one vehicle, the one that saw it coming decides (docs/plate-recognition-plan.md, section 11).
    The tracker rules are ported 1:1 from the notifier, where they were verified on 264 captures:
    misread correction, repeat window (20 min), same-pass window (60 s), gap flags, time inside.
 2. **GPS geofence**: the server polls every vehicle every 10 s, so it sees each vehicle enter and leave a

@@ -50,6 +50,13 @@ REUSE_FRAMES = 4        # vehicle boxes are reused for this many frames (1 s at 
 # A plate must move this far across the picture during the pass. Measured on 36 recorded passes (6 Nov 2026): every
 # one moved 281 px or more; a parked vehicle's plate stays within a few px.
 MIN_MOVE_PX = 60
+# Which way the plate moved: both plate cameras look down at oncoming traffic, so a plate coming at the camera moves
+# down the picture and one going away moves up. The cameras' own captures are front plates only; ours are not, and on
+# 18 Nov 2026 cars in view of both cameras were read from behind and logged the wrong way. The app uses it to tell
+# which camera saw the front (docs/plate-recognition-plan.md, section 11). 12 tracks of 6 passes seen by both cameras
+# moved 57-757 px down (toward) or 88-630 px up (away) in the 2560x1440 picture, and grew or shrank with it.
+# 'away' is not 'seen from behind': mixers reverse in front of ANPR-1, front plate moving away.
+HEADING_PX = 40
 MAX_PASS_S = 40.0       # a vehicle standing in view: close the pass, start again if it still moves
 PRE_S = 4.0             # a re-read from the recording starts this long before the motion was seen
 # The NVR serves a recording about a minute after (7 Nov 2026: 40 s back was refused with 400, 60 s back worked).
@@ -111,6 +118,23 @@ def similar(a, b):
     return row[-1] <= 2
 
 
+def heading(at):
+    """'toward' the camera, 'away' from it, or None (can't tell), from a plate's track [(x, y, t, width), ...]: the
+    later half of the reads against the earlier half. Only 'away' changes the direction, so it needs both signs: up
+    the picture and smaller. 'toward' needs only the move down (a truck turning toward ANPR-1 showed a narrower plate)."""
+    at = sorted(at, key=lambda a: a[2])
+    if len(at) < 2:
+        return None
+    h = len(at) // 2
+    mean = lambda xs, i: sum(a[i] for a in xs) / len(xs)  # noqa: E731
+    dy = mean(at[h:], 1) - mean(at[:h], 1)
+    if dy >= HEADING_PX:
+        return 'toward'
+    if dy <= -HEADING_PX and mean(at[h:], 3) < mean(at[:h], 3):
+        return 'away'
+    return None
+
+
 def new_pass(start, source):
     return {'start': start, 'last': start, 'source': source, 'votes': Counter(), 'best': {}, 'at': {}, 'frames': 0,
             'seen': set(), 'stop': threading.Event(), 'reader_done': threading.Event()}
@@ -162,8 +186,9 @@ class Passes:
             old = time.time() - self.keep_s
             while self.items and self.items[0]['time'] / 1000 < old:
                 self.items.popleft()
-        log.info('pass ch%s %s x%d (%d frames read%s)', p['channel'], p['plate'], p['votes'], p['frames'],
-                 ', from the recording' if p.get('source') == 'recording' else '')
+        log.info('pass ch%s %s x%d (%d frames read%s%s)', p['channel'], p['plate'], p['votes'], p['frames'],
+                 ', from the recording' if p.get('source') == 'recording' else '',
+                 f", {p['heading']}" if p.get('heading') else '')
 
     def after(self, seq):
         with self.lock:
@@ -326,7 +351,7 @@ class Watcher(threading.Thread):
                 continue
             ps['votes'][r['plate']] += 1
             b = r['box']
-            ps['at'].setdefault(r['plate'], []).append(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, t))
+            ps['at'].setdefault(r['plate'], []).append(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, t, b[2] - b[0]))
             best = ps['best'].get(r['plate'])
             if best is None or r['conf'] > best['conf']:
                 ps['best'][r['plate']] = {'conf': r['conf'], 'jpg': jpg, 't': t}
@@ -391,7 +416,7 @@ class Watcher(threading.Thread):
             self.stats['passes_recording' if rec else 'passes_live'] += 1
             self.passes.add({'channel': self.channel, 'time': int(b['t'] * 1000), 'plate': plate, 'conf': b['conf'],
                              'votes': ps['votes'][plate], 'frames': ps['frames'], 'others': others, 'source': ps['source'],
-                             'jpeg': base64.b64encode(b['jpg']).decode()})
+                             'heading': heading(ps['at'][plate]), 'jpeg': base64.b64encode(b['jpg']).decode()})
         if rec:
             self.stats['rereads_found' if found else 'rereads_empty'] += 1
             job = ps.get('job') or {}

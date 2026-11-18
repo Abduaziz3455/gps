@@ -456,3 +456,47 @@ Test period, after the app's misread correction (`plates.correct` against plates
   (`camera_silent`: GPS saw trucks cross, no plate read) is gone. The cameras record video and our reader reads it, so a
   camera that reads nothing itself is not a fault, and GPS crossings at night are often trucks on the public road. Only
   "kamerasi o'chgan" (the NVR reports the camera unplugged) remains. Mode B is always on, not switched by that alert.
+
+## 11. Direction from how the plate moved (18 Nov 2026)
+
+**What went wrong.** Until then the camera alone decided the direction: ANPR-1 (ch4) = in, ANPR-2 (ch3) = out. That
+holds for the cameras' own captures, which are front plates of oncoming vehicles. Our reader reads rear plates too. The
+cameras' captures had stopped, so every event came from our reader. A vehicle in view of both cameras was then logged
+by whichever camera's pass arrived first, and the other was skipped as "same pass". Five events on 18 Nov morning went
+the wrong way, each read from behind by the camera it was driving away from:
+
+| Event | Plate | Logged | Picture | Really |
+|---|---|---|---|---|
+| 2680 | 85W670JA | ANPR-2 out | rear, driving into the yard | in |
+| 2681 | 85W670JA | ANPR-1 in | rear, driving off down the lane | out |
+| 2688 | 85450KBA | ANPR-2 out | rear of the dump truck | in |
+| 2690 | 85O461MA | ANPR-2 out | rear, driving into the yard | in |
+| 2691 | 85O461MA | ANPR-1 in | rear, driving off down the lane | out |
+
+**What was measured.** The recordings of every event that morning were read with the production models at 4 frames a
+second, from both cameras (a throwaway container on icalluz, `--cpus 1.2`). Both cameras look down at oncoming
+traffic.
+- **The six passes seen by both cameras** (the five above, and 85304RAA leaving, 2685): 12 plate tracks.
+  - Toward the camera, the plate moved 57–757 px **down** the 2560x1440 picture and grew (width x1.10 to x1.64).
+  - Away from it, the plate moved 88–630 px **up** and shrank (x0.66 to x0.86).
+  - In every pair, exactly one camera saw the vehicle coming, and its direction was the right one.
+- **Movement alone is not enough.** Four of 13 GPS-confirmed mixer entries on ANPR-1 moved up and shrank, like a car
+  driving off: 2662, 2666, 2671 and 2675. The picture of 2666 shows the front of truck 32. Mixers reverse in front of
+  ANPR-1 as they turn into the yard, so a front plate moves away. Flipping on "away" would have turned these entries
+  into exits.
+
+**The rule.**
+- The reader reports each pass with `heading`, comparing the later half of the plate's reads with the earlier half:
+  - `toward`: 40 px or more down.
+  - `away`: 40 px or more up, and smaller.
+  - `null`: anything else.
+- The app (`src/cameras/ownreader.js`) holds an `away` pass up to 2 minutes from its time, because a re-read from the
+  recording comes 1.5–2 minutes after a pass.
+  - If the other camera read the same plate coming `toward` it within 30 s, the `away` pass is dropped. The other
+    camera's pass gives the direction, the camera's usual one.
+  - Otherwise the `away` pass goes through as before, with its camera's direction.
+- No direction is ever turned around. The cost: an entry seen only reversing under ANPR-1 is alerted about 75 s later
+  than other passes, which have a 45 s hold.
+- Passes released together go in time order.
+- **Watch:** the app log says `driving away, dropped: ANPR-n saw it coming`, and `/health` counts these as
+  `ownReader.away`. The reader's `pass chN …` log line ends with the heading.

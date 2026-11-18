@@ -28,8 +28,8 @@ def watcher(can_reread=True):
     return w
 
 
-def read(plate, conf=0.95, x=1000, y=500, cut=False):
-    return {'plate': plate, 'conf': conf, 'det': 0.8, 'box': [x - 100, y - 30, x + 100, y + 30], 'cut': cut}
+def read(plate, conf=0.95, x=1000, y=500, cut=False, w=200):
+    return {'plate': plate, 'conf': conf, 'det': 0.8, 'box': [x - w / 2, y - 30, x + w / 2, y + 30], 'cut': cut}
 
 
 def frames(w, ps, script, t0=1000.0):
@@ -188,6 +188,23 @@ class Decide(unittest.TestCase):
         w._finish(ps)
         self.assertEqual([j['start'] for j in w.jobs.items], [1100, 1500, 1600])
         self.assertEqual(w.stats['rereads_skipped'], 4)
+
+    def test_a_pass_says_which_way_the_plate_moved(self):
+        w = watcher()
+        ps = server.new_pass(1000, 'live')
+        # Toward the camera: down the picture. 85O461MA (18 Nov) drove away from ANPR-2 into the yard: up the picture.
+        frames(w, ps, [[read('85450KBA', y=300), read('85O461MA', y=500, x=2000)],
+                       [read('85450KBA', y=500), read('85O461MA', y=380, x=2000, w=150)],
+                       [read('85450KBA', y=700), read('85O461MA', y=300, x=2000, w=120)]])
+        w._finish(ps)
+        self.assertEqual({p['plate']: p['heading'] for p in w.passes.items}, {'85450KBA': 'toward', '85O461MA': 'away'})
+
+    def test_heading(self):
+        self.assertIsNone(server.heading([(0, 500, 1, 200)]), 'one read: no way to tell')
+        self.assertIsNone(server.heading([(0, 500, 1, 200), (400, 510, 2, 200)]), 'across, not up or down')
+        self.assertEqual(server.heading([(0, 900, 2, 200), (0, 500, 1, 200)]), 'toward', 'in time order')
+        self.assertEqual(server.heading([(0, 900, 1, 200), (0, 880, 2, 190), (0, 600, 3, 120), (0, 620, 4, 110)]), 'away')
+        self.assertIsNone(server.heading([(0, 900, 1, 200), (0, 600, 2, 210)]), 'up the picture but not smaller: unsure')
 
     def test_similar(self):
         self.assertTrue(server.similar('85450KBA', '85430KBA'))

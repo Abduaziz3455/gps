@@ -152,6 +152,51 @@ test('similar plates are kept when both are fleet trucks, on another camera, or 
   assert.equal(own.stats.misread, 0);
 });
 
+test('a vehicle in view of both cameras goes the way of the camera that saw it coming', async () => {
+  const { own, reader, events } = setup();
+  await own.poll();
+  const t = Date.now() - 900e3;
+  // 18 Nov 2026, 85O461MA: read from behind by the camera it was driving away from, seconds before the other one.
+  reader.add({ channel: 3, time: t, plate: '85O461MA', conf: 0.99, votes: 20, heading: 'away' }); // into the yard
+  reader.add({ channel: 4, time: t + 2e3, plate: '85O461MA', conf: 0.99, votes: 8, heading: 'toward' });
+  reader.add({ channel: 4, time: t + 360e3, plate: '85O461MA', conf: 0.99, votes: 20, heading: 'away' }); // out
+  reader.add({ channel: 3, time: t + 366e3, plate: '85O461MA', conf: 0.97, votes: 3, heading: 'toward' });
+  await own.poll();
+  await own.release();
+  assert.deepEqual(events().map((e) => [e.camera, e.direction]), [['ANPR-1', 'in'], ['ANPR-2', 'out']]);
+  assert.equal(own.stats.away, 2);
+});
+
+test("driving away alone decides nothing: a mixer reversing in front of ANPR-1 is still an entry", async () => {
+  const { own, reader, events } = setup();
+  await own.poll();
+  const t = Date.now() - 50e3;
+  reader.add({ channel: 4, time: t, plate: '85450KBA', conf: 0.99, votes: 9, heading: 'away' });
+  reader.add({ channel: 3, time: t + 5e3, plate: '85450KBA', conf: 0.99, votes: 3 }); // no heading: no say
+  await own.poll();
+  await own.release(t + 51e3);
+  assert.equal(events().length, 1, 'ANPR-2, no heading, goes on as before');
+  await own.release(t + 100e3);
+  assert.equal(events().length, 1, 'ANPR-1 waits for a read of its front on ANPR-2');
+  await own.release(t + 121e3);
+  assert.deepEqual(events().map((e) => [e.camera, e.direction]), [['ANPR-2', 'out']],
+    'then goes through as the camera says, here a same-pass skip');
+});
+
+test('the front read arriving late from the recording still decides, and passes go in the order they happened', async () => {
+  const { own, reader, events } = setup();
+  await own.poll();
+  const t = Date.now() - 50e3;
+  reader.add({ channel: 4, time: t, plate: '85W670JA', conf: 0.99, votes: 25, heading: 'away' });
+  await own.poll();
+  await own.release(t + 60e3);
+  assert.equal(events().length, 0, 'still waiting for ANPR-2');
+  reader.add({ channel: 3, time: t + 3e3, plate: '85W670JA', conf: 0.98, votes: 8, heading: 'toward', source: 'recording' });
+  await own.poll();
+  await own.release(t + 95e3);
+  assert.deepEqual(events().map((e) => [e.camera, e.direction]), [['ANPR-2', 'out']]);
+});
+
 test("passes the reader saw before we connected aren't replayed; a restarted reader is picked up again", async () => {
   const { own, reader, events } = setup();
   reader.add({ channel: 4, time: Date.now() - 3600e3, plate: '85450KBA', conf: 0.99 });

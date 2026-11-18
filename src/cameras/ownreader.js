@@ -15,6 +15,14 @@
  *                    from one recording). A plate that is not one of the fleet's, reported within TWIN_MS of a
  *                    similar plate on the same camera that was read more often or is a fleet plate, is that misread
  *                    and dropped. Fleet plates are never dropped: real trucks here are one character apart.
+ *                    The camera decides the direction, and the cameras' own captures are front plates. Ours are not:
+ *                    a vehicle in view of both cameras is read by both, from the front by the camera it drives toward
+ *                    and from behind by the other. On 18 Nov 2026 the rear read came first five times and the pass
+ *                    was logged the wrong way. So a pass seen driving away from its camera (heading 'away', from how
+ *                    the plate moved in the picture) waits up to PAIR_WAIT_MS for the other camera's read, and is
+ *                    dropped when the other camera saw the same plate coming toward it: that read decides.
+ *                    'away' alone decides nothing: mixers reverse in front of ANPR-1 when they come in, front plate
+ *                    moving away (docs/plate-recognition-plan.md, section 11).
  *
  * If the reader is down or slow, the gate works exactly as without it: every call has a short timeout and a
  * failure only costs our read.
@@ -24,6 +32,9 @@ const plates = require('./plates');
 const OWN_PREFIX = 'own_';
 const RECENT_MS = 15 * 60e3;
 const TWIN_MS = 15e3;
+const PAIR_MS = 30e3;        // the other camera's read of the same pass: 0-10 s apart on 18 Nov 2026
+// A re-read from the recording reaches the app 1.5-2 minutes after the pass (the NVR serves it a minute later).
+const PAIR_WAIT_MS = 120e3;
 
 class OwnReader {
   /**
@@ -48,7 +59,7 @@ class OwnReader {
     this.stopped = false;
     this.lastOk = null;
     this.lastError = null;
-    this.stats = { passes: 0, used: 0, cameraHad: 0, misread: 0, rereads: 0, rereadUsed: 0 };
+    this.stats = { passes: 0, used: 0, cameraHad: 0, misread: 0, away: 0, rereads: 0, rereadUsed: 0 };
   }
 
   start() {
@@ -121,11 +132,20 @@ class OwnReader {
     return null;
   }
 
-  /** Passes held long enough: the camera's capture had its chance. */
+  /** Passes held long enough: the camera's capture had its chance, and a pass driving away the other camera's read. */
   async release(now = Date.now()) {
-    const due = this.held.filter((p) => now - p.time >= this.holdMs);
-    this.held = this.held.filter((p) => now - p.time < this.holdMs);
+    const waiting = (p) => now - p.time < this.holdMs
+      || (p.heading === 'away' && now - p.time < PAIR_WAIT_MS && !this.frontOn(p, plates.normalize(p.plate)));
+    // In the order they happened: a pass read again from the recording arrives a minute after later live ones.
+    const due = this.held.filter((p) => !waiting(p)).sort((a, b) => a.time - b.time);
+    this.held = this.held.filter(waiting);
     for (const p of due) await this.handle(p);
+  }
+
+  /** The other camera's read of this plate, coming toward that camera, within PAIR_MS: the read that saw its front. */
+  frontOn(p, plate) {
+    return this.recent.find((q) => q.channel !== p.channel && q.heading === 'toward' && q.conf >= this.minConf
+      && Math.abs(q.time - p.time) <= PAIR_MS && plates.normalize(q.plate) === plate) || null;
   }
 
   /** True when the camera itself recorded a capture on this channel around this time. */
@@ -154,6 +174,13 @@ class OwnReader {
       name: `${OWN_PREFIX}${p.channel}_${p.time}`, channel: p.channel, time: p.time, plate,
       own: { conf: p.conf, votes: p.votes, jpeg: Buffer.from(p.jpeg, 'base64') },
     };
+    const front = p.heading === 'away' ? this.frontOn(p, plate) : null;
+    if (front) {
+      this.stats.away++;
+      const other = this.gate.cameras.get(front.channel);
+      this.log.info?.(`own reader: ${cam.name} ${plate} (${p.votes} frames) driving away, dropped: ${other?.name || `ch${front.channel}`} saw it coming, ${other?.direction}`);
+      return;
+    }
     const d = this.gate.tracker.process(cap, cam);
     if (!d) return;
     this.log.info?.(`own reader: ${cam.name} ${plate} (${p.votes} frames, conf ${p.conf}): ${d.emit ? 'new gate event' : d.skipReason}`);
