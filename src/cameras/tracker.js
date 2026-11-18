@@ -5,7 +5,8 @@
  *
  * Rules (evidence in docs/site-survey.md):
  * - The camera decides the direction: ANPR-1 faces vehicles entering, ANPR-2 faces vehicles leaving. Our reader's
- *   read of a vehicle driving away is dropped when the other camera saw it coming (ownreader.js).
+ *   read of a vehicle driving away is dropped when the other camera saw it coming, or on ANPR-2 turned around
+ *   (seen from behind going into the yard; ownreader.js).
  * - Same plate, same direction within `repeatWindowMs`: camera re-trigger or maneuvering -> skip.
  * - Same plate, opposite direction within `samePassWindowMs`: one pass seen by both cameras -> skip.
  * - Only valid plates get presence tracking; unread/invalid plates are still alerted (with a photo).

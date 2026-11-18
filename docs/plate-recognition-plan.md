@@ -485,18 +485,26 @@ traffic.
   ANPR-1 as they turn into the yard, so a front plate moves away. Flipping on "away" would have turned these entries
   into exits.
 
+- **ANPR-2 is different.** After the first deploy (18 Nov, 12:49), mixer 10861HDA was read from behind on ANPR-2,
+  going into the yard. ANPR-1 only glimpsed it, so with no front read it was logged as an exit with no entry. Pictures
+  of ANPR-2's earlier exits without an entry show the same pattern: 2338 and 2376 (mixer rears, GPS "left but standing
+  next to the yard"), 2522 (van rear) and 2510. None showed a vehicle reversing away from ANPR-2.
+
 **The rule.**
 - The reader reports each pass with `heading`, comparing the later half of the plate's reads with the earlier half:
   - `toward`: 40 px or more down.
   - `away`: 40 px or more up, and smaller.
   - `null`: anything else.
-- The app (`src/cameras/ownreader.js`) holds an `away` pass up to 2 minutes from its time, because a re-read from the
-  recording comes 1.5–2 minutes after a pass.
-  - If the other camera read the same plate coming `toward` it within 30 s, the `away` pass is dropped. The other
-    camera's pass gives the direction, the camera's usual one.
-  - Otherwise the `away` pass goes through as before, with its camera's direction.
-- No direction is ever turned around. The cost: an entry seen only reversing under ANPR-1 is alerted about 75 s later
-  than other passes, which have a 45 s hold.
+- The app (`src/cameras/ownreader.js`) handles an `away` pass this way:
+  1. If the other camera read the same plate coming `toward` it within 30 s, the `away` pass is dropped. The other
+     camera's pass decides, with its usual direction.
+  2. Otherwise, on a camera with `awayIsRear` (ANPR-2, in `src/config.js`), the vehicle was seen from behind. It goes
+     the other way than the camera stands for: into the yard. Counted as `ownReader.rear`.
+  3. Otherwise (ANPR-1), it waits up to 2 minutes from its time for the other camera's read, then goes with the
+     camera's direction. A re-read from the recording comes 1.5–2 minutes after a pass.
+- The cost of step 3: an entry seen only reversing under ANPR-1 is alerted about 75 s later than other passes, which
+  have a 45 s hold.
 - Passes released together go in time order.
-- **Watch:** the app log says `driving away, dropped: ANPR-n saw it coming`, and `/health` counts these as
-  `ownReader.away`. The reader's `pass chN …` log line ends with the heading.
+- **Watch:** the app log says `driving away, dropped: ANPR-n saw it coming` or `seen from behind: in`. `/health`
+  counts these as `ownReader.away` and `ownReader.rear`. The reader's `pass chN …` log line ends with the heading. If
+  a mixer is ever seen reversing away from ANPR-2, step 2 would log it as an entry: switch `awayIsRear` off.

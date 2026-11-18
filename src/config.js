@@ -15,12 +15,15 @@ const list = (v) => [...new Set(String(v || '').split(',').map((x) => x.trim()).
  * topView: seconds around the plate capture to read from the overview camera's recording, where the vehicle is
  * expected (`expect`), and the part of the picture a vehicle on this lane covers (fractions of width and height).
  * Yo'l-2's picture also holds the public road on the upper left, whose traffic must not count.
+ * awayIsRear: a plate our reader saw moving away from this camera is a rear plate, so the vehicle goes the other way
+ * than the camera stands for. True for ANPR-2 (vehicles seen from behind going into the yard), not for ANPR-1, where
+ * mixers reverse as they come in (docs/plate-recognition-plan.md, section 11).
  */
 const DEFAULT_CAMERAS = [
   { channel: 4, name: 'ANPR-1', direction: 'in', contextChannel: 5, contextName: "Yo'l-2",
     topView: { from: -16, to: 20, expect: 1, lane: [[0, 0.6], [0.46, 0], [0.74, 0], [0.74, 1], [0, 1]] } },
   { channel: 3, name: 'ANPR-2', direction: 'out', contextChannel: 6, contextName: "Yo'l-1",
-    topView: { from: -30, to: 4, expect: -12, lane: [[0, 0.35], [1, 0.35], [1, 1], [0, 1]] } },
+    topView: { from: -30, to: 4, expect: -12, lane: [[0, 0.35], [1, 0.35], [1, 1], [0, 1]] }, awayIsRear: true },
 ];
 
 function parseCameras(text) {
@@ -34,6 +37,7 @@ function parseCameras(text) {
     contextChannel: c.contextChannel ? Number(c.contextChannel) : null,
     contextName: c.contextName || null,
     topView: c.topView || null,
+    awayIsRear: !!c.awayIsRear,
   }));
 }
 

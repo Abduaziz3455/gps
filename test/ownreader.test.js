@@ -14,7 +14,7 @@ const plates = require('../src/cameras/plates');
 
 const CAMS = [
   { channel: 4, name: 'ANPR-1', direction: 'in', contextChannel: null, contextName: null },
-  { channel: 3, name: 'ANPR-2', direction: 'out', contextChannel: null, contextName: null },
+  { channel: 3, name: 'ANPR-2', direction: 'out', contextChannel: null, contextName: null, awayIsRear: true },
 ];
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 
@@ -181,6 +181,18 @@ test("driving away alone decides nothing: a mixer reversing in front of ANPR-1 i
   await own.release(t + 121e3);
   assert.deepEqual(events().map((e) => [e.camera, e.direction]), [['ANPR-2', 'out']],
     'then goes through as the camera says, here a same-pass skip');
+});
+
+test('on ANPR-2 a vehicle driving away was seen from behind going into the yard: an entry, without waiting', async () => {
+  const { own, reader, events } = setup();
+  await own.poll();
+  const t = Date.now() - 50e3;
+  // 18 Nov 2026 12:49, mixer 10861HDA: rear plate on ANPR-2, ANPR-1 only glimpsed it.
+  reader.add({ channel: 3, time: t, plate: '85450KBA', conf: 0.99, votes: 13, heading: 'away' });
+  await own.poll();
+  await own.release(t + 46e3);
+  assert.deepEqual(events().map((e) => [e.camera, e.direction]), [['ANPR-2', 'in']]);
+  assert.equal(own.stats.rear, 1);
 });
 
 test('the front read arriving late from the recording still decides, and passes go in the order they happened', async () => {

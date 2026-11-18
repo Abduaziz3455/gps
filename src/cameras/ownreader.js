@@ -18,11 +18,14 @@
  *                    The camera decides the direction, and the cameras' own captures are front plates. Ours are not:
  *                    a vehicle in view of both cameras is read by both, from the front by the camera it drives toward
  *                    and from behind by the other. On 18 Nov 2026 the rear read came first five times and the pass
- *                    was logged the wrong way. So a pass seen driving away from its camera (heading 'away', from how
- *                    the plate moved in the picture) waits up to PAIR_WAIT_MS for the other camera's read, and is
- *                    dropped when the other camera saw the same plate coming toward it: that read decides.
- *                    'away' alone decides nothing: mixers reverse in front of ANPR-1 when they come in, front plate
- *                    moving away (docs/plate-recognition-plan.md, section 11).
+ *                    was logged the wrong way. A pass seen driving away from its camera (heading 'away', from how the
+ *                    plate moved in the picture):
+ *                    - is dropped when the other camera saw the same plate coming toward it: that read decides;
+ *                    - otherwise, on a camera where moving away means seen from behind (`awayIsRear`, ANPR-2), goes
+ *                      the other way than the camera stands for: into the yard;
+ *                    - otherwise (ANPR-1, where mixers reverse as they come in, front plate moving away) waits up to
+ *                      PAIR_WAIT_MS for the other camera's read, and then goes as the camera says.
+ *                    Evidence: docs/plate-recognition-plan.md, section 11.
  *
  * If the reader is down or slow, the gate works exactly as without it: every call has a short timeout and a
  * failure only costs our read.
@@ -59,7 +62,7 @@ class OwnReader {
     this.stopped = false;
     this.lastOk = null;
     this.lastError = null;
-    this.stats = { passes: 0, used: 0, cameraHad: 0, misread: 0, away: 0, rereads: 0, rereadUsed: 0 };
+    this.stats = { passes: 0, used: 0, cameraHad: 0, misread: 0, away: 0, rear: 0, rereads: 0, rereadUsed: 0 };
   }
 
   start() {
@@ -135,7 +138,8 @@ class OwnReader {
   /** Passes held long enough: the camera's capture had its chance, and a pass driving away the other camera's read. */
   async release(now = Date.now()) {
     const waiting = (p) => now - p.time < this.holdMs
-      || (p.heading === 'away' && now - p.time < PAIR_WAIT_MS && !this.frontOn(p, plates.normalize(p.plate)));
+      || (p.heading === 'away' && !this.gate.cameras.get(p.channel)?.awayIsRear && now - p.time < PAIR_WAIT_MS
+        && !this.frontOn(p, plates.normalize(p.plate)));
     // In the order they happened: a pass read again from the recording arrives a minute after later live ones.
     const due = this.held.filter((p) => !waiting(p)).sort((a, b) => a.time - b.time);
     this.held = this.held.filter(waiting);
@@ -181,9 +185,11 @@ class OwnReader {
       this.log.info?.(`own reader: ${cam.name} ${plate} (${p.votes} frames) driving away, dropped: ${other?.name || `ch${front.channel}`} saw it coming, ${other?.direction}`);
       return;
     }
-    const d = this.gate.tracker.process(cap, cam);
+    const rear = p.heading === 'away' && cam.awayIsRear; // seen from behind: going the other way
+    if (rear) this.stats.rear++;
+    const d = this.gate.tracker.process(cap, rear ? { ...cam, direction: cam.direction === 'in' ? 'out' : 'in' } : cam);
     if (!d) return;
-    this.log.info?.(`own reader: ${cam.name} ${plate} (${p.votes} frames, conf ${p.conf}): ${d.emit ? 'new gate event' : d.skipReason}`);
+    this.log.info?.(`own reader: ${cam.name} ${plate} (${p.votes} frames, conf ${p.conf}${rear ? `, seen from behind: ${d.direction}` : ''}): ${d.emit ? 'new gate event' : d.skipReason}`);
     if (!d.emit) return;
     this.stats.used++;
     await this.gate.onDecision(d, 'live');
